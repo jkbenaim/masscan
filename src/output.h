@@ -118,6 +118,8 @@ struct Output
     struct {
         char *stylesheet;
     } xml;
+    struct {
+    } sqlite;
 };
 
 const char *name_from_ip_proto(unsigned ip_proto);
@@ -137,6 +139,7 @@ extern const struct OutputType binary_output;
 extern const struct OutputType null_output;
 extern const struct OutputType redis_output;
 extern const struct OutputType grepable_output;
+extern const struct OutputType sqlite_output;
 
 /**
  * Creates an "output" object. This is called by the receive thread in order

@@ -1179,6 +1179,7 @@ static int SET_output_format(struct Masscan *masscan, const char *name, const ch
     else if (EQUALS("certs", value))        x = Output_Certs;
     else if (EQUALS("none", value))         x = Output_None;
     else if (EQUALS("redis", value))        x = Output_Redis;
+    else if (EQUALS("sqlite", value))       x = Output_SQLite;
     else {
         LOG(0, "FAIL: unknown output-format: %s\n", value);
         LOG(0, "  hint: 'binary', 'xml', 'grepable', ...\n");
@@ -2546,6 +2547,9 @@ masscan_command_line(struct Masscan *masscan, int argc, char *argv[])
                     break;
                 case 'U':
                     masscan_set_parameter(masscan, "output-format", "unicornscan");
+                    break;
+                case 'Q':
+                    masscan_set_parameter(masscan, "output-format", "sqlite");
                     break;
                 default:
                     fprintf(stderr, "nmap(%s): unknown output format\n", argv[i]);
