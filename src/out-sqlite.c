@@ -10,7 +10,6 @@
 static void
 *sqlite_out_create(struct Output *out)
 {
-    /* TODO */
     return NULL;
 }
 
@@ -19,12 +18,6 @@ static void
 static void
 sqlite_out_open(struct Output *out, FILE *fp)
 {
-    
-    
-//     sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
-//                       unsigned ip, unsigned ip_proto, unsigned port,
-//                       enum ApplicationProtocol proto, unsigned ttl,
-//                       const unsigned char *px, unsigned length)
     fprintf(fp,
         "PRAGMA jorunal_mode=WAL;\n"
         "CREATE TABLE IF NOT EXISTS status(\n"
@@ -45,7 +38,6 @@ sqlite_out_open(struct Output *out, FILE *fp)
         "    ttl INTEGER,\n"
         "    px TEXT\n"
         ");\n"
-//         "BEGIN;\n"
     );
 }
 
@@ -55,7 +47,6 @@ sqlite_out_open(struct Output *out, FILE *fp)
 static void
 sqlite_out_close(struct Output *out, FILE *fp)
 {
-//     fprintf(fp, "END;\n");
 }
 
 /****************************************************************************
