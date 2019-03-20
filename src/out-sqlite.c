@@ -24,6 +24,7 @@ sqlite_out_open(struct Output *out, FILE *fp)
         "    time INTEGER,\n"
         "    status TEXT,\n"
         "    ip TEXT,\n"
+	"    ip_d INTEGER,\n"
         "    ip_proto TEXT,\n"
         "    port INTEGER,\n"
         "    reason TEXT,\n"
@@ -31,7 +32,8 @@ sqlite_out_open(struct Output *out, FILE *fp)
         ");\n"
         "CREATE TABLE IF NOT EXISTS banners(\n"
         "    time INTEGER,\n"
-        "    ip TEXT,\n"
+	"    ip TEXT,\n"
+	"    ip_d INTEGER,\n"
         "    ip_proto INTEGER,\n"
         "    port INTEGER,\n"
         "    proto TEXT,\n"
@@ -57,17 +59,18 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 {
     uint8_t ip_bytes[4];
     char ip_string[16];
-    ip = htonl(ip);
-    memcpy(&ip_bytes, &ip, 4);
+    unsigned temp = htonl(ip);
+    memcpy(&ip_bytes, &temp, 4);
     
     char reason_buffer[128];
     
     reason_string(reason, reason_buffer, sizeof(reason_buffer)),
     snprintf((char *)&ip_string, 16, "%u.%u.%u.%u", ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]);
-    fprintf(fp, "INSERT INTO status VALUES(%ld, \"%s\", \"%s\", \"%s\", %u, \"%s\",%u);\n",
+    fprintf(fp, "INSERT INTO status VALUES(%ld, \"%s\", \"%s\", %u, \"%s\", %u, \"%s\",%u);\n",
             timestamp,
             status_string(status),
             ip_string,
+	    ip,
             name_from_ip_proto(ip_proto),
             port,
             reason_buffer,
@@ -86,14 +89,15 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 {
     uint8_t ip_bytes[4];
     char ip_string[16];
-    ip = htonl(ip);
-    memcpy(&ip_bytes, &ip, 4);
+    unsigned temp = htonl(ip);
+    memcpy(&ip_bytes, &temp, 4);
     snprintf((char *)&ip_string, 16, "%u.%u.%u.%u", ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]);
     char banner_buffer[4096];
     
-    fprintf(fp, "INSERT INTO banners VALUES(%ld, \"%s\", \"%s\", %d, \"%s\", %d, \"%s\");\n",
+    fprintf(fp, "INSERT INTO banners VALUES(%ld, \"%s\", %u, \"%s\", %d, \"%s\", %d, \"%s\");\n",
             timestamp,
             ip_string,
+	    ip,
             name_from_ip_proto(ip_proto),
             port,
             masscan_app_to_string(proto),
