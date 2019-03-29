@@ -6,7 +6,7 @@ else
 CC = cc
 endif
 
-PREFIX ?= /usr
+PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 SYS := $(shell $(CC) -dumpmachine)
 GITVER := $(shell git describe --tags)
