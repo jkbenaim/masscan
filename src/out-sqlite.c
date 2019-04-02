@@ -5,6 +5,29 @@
 #include "out-record.h"
 #include "string_s.h"
 
+static void sqlite_out_tr_end(struct Output *out, FILE *fp)
+{
+	if(out->sqlite.in_transaction) {
+		fprintf(fp, "END;\n");
+		out->sqlite.in_transaction = 0;
+	}
+}
+
+static void sqlite_out_tr_continue(struct Output *out, FILE *fp, unsigned rows)
+{
+	if((out->sqlite.rows_this_transaction >= out->sqlite.rows_per_transaction)
+		&& out->sqlite.in_transaction) {
+		fprintf(fp, "END;\n");
+		out->sqlite.rows_this_transaction = 0;
+		out->sqlite.in_transaction = 0;
+	}
+	if(!out->sqlite.in_transaction) {
+		fprintf(fp, "BEGIN;\n");
+		out->sqlite.in_transaction = 1;
+	}
+	out->sqlite.rows_this_transaction += rows;
+}
+
 /****************************************************************************
  ****************************************************************************/
 static void
@@ -18,29 +41,37 @@ static void
 static void
 sqlite_out_open(struct Output *out, FILE *fp)
 {
-    fprintf(fp,
-        "PRAGMA jorunal_mode=WAL;\n"
-        "CREATE TABLE IF NOT EXISTS status(\n"
-        "    time INTEGER,\n"
-        "    status TEXT,\n"
-        "    ip TEXT,\n"
-	"    ip_d INTEGER,\n"
-        "    ip_proto TEXT,\n"
-        "    port INTEGER,\n"
-        "    reason TEXT,\n"
-        "    ttl INTEGER\n"
-        ");\n"
-        "CREATE TABLE IF NOT EXISTS banners(\n"
-        "    time INTEGER,\n"
-	"    ip TEXT,\n"
-	"    ip_d INTEGER,\n"
-        "    ip_proto INTEGER,\n"
-        "    port INTEGER,\n"
-        "    proto TEXT,\n"
-        "    ttl INTEGER,\n"
-        "    px TEXT\n"
-        ");\n"
-    );
+	out->sqlite.in_transaction = 0;
+	out->sqlite.rows_per_transaction = 100000;
+	out->sqlite.rows_this_transaction = 0;
+
+	fprintf(fp,
+		"PRAGMA jorunal_mode=WAL;\n"
+		"CREATE TABLE IF NOT EXISTS status(\n"
+		"    time INTEGER,\n"
+		"    ip TEXT,\n"
+		"    ip_proto INTEGER,\n"
+		"    port INTEGER,\n"
+		"    ttl INTEGER,\n"
+		"    status INTEGER,\n"
+		"    reason TEXT\n"
+		");\n"
+		"CREATE TABLE IF NOT EXISTS banners(\n"
+		"    time INTEGER,\n"
+		"    ip TEXT,\n"
+		"    ip_proto INTEGER,\n"
+		"    port INTEGER,\n"
+		"    ttl INTEGER,\n"
+		"    proto TEXT,\n"
+		"    px TEXT\n"
+		");\n"
+		"CREATE TABLE IF NOT EXISTS scans(\n"
+		"    scan_id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+		"    time INTEGER\n"
+		");\n"
+	);
+
+	sqlite_out_tr_continue(out, fp, 0);
 }
 
 
@@ -49,6 +80,8 @@ sqlite_out_open(struct Output *out, FILE *fp)
 static void
 sqlite_out_close(struct Output *out, FILE *fp)
 {
+	sqlite_out_tr_end(out, fp);
+	fprintf(fp, "ANALYZE;\n");
 }
 
 /****************************************************************************
@@ -66,15 +99,17 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
     
     reason_string(reason, reason_buffer, sizeof(reason_buffer)),
     snprintf((char *)&ip_string, 16, "%u.%u.%u.%u", ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]);
-    fprintf(fp, "INSERT INTO status VALUES(%ld, \"%s\", \"%s\", %u, \"%s\", %u, \"%s\",%u);\n",
+
+    sqlite_out_tr_continue(out, fp, 1);
+
+    fprintf(fp, "INSERT INTO status VALUES(%ld, \"%s\", %u, %u, %u, %d, \"%s\");\n",
             timestamp,
-            status_string(status),
             ip_string,
-	    ip,
-            name_from_ip_proto(ip_proto),
+            ip_proto,
             port,
-            reason_buffer,
-            ttl
+            ttl,
+            status,
+            reason_buffer
     );
 }
 
@@ -92,16 +127,17 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
     unsigned temp = htonl(ip);
     memcpy(&ip_bytes, &temp, 4);
     snprintf((char *)&ip_string, 16, "%u.%u.%u.%u", ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]);
-    char banner_buffer[4096];
+    char banner_buffer[131072];
+
+    sqlite_out_tr_continue(out, fp, 1);
     
-    fprintf(fp, "INSERT INTO banners VALUES(%ld, \"%s\", %u, \"%s\", %d, \"%s\", %d, \"%s\");\n",
+    fprintf(fp, "INSERT INTO banners VALUES(%ld, \"%s\", %u, %u, %u, \"%s\", \"%s\");\n",
             timestamp,
             ip_string,
-	    ip,
-            name_from_ip_proto(ip_proto),
+            ip_proto,
             port,
-            masscan_app_to_string(proto),
             ttl,
+            masscan_app_to_string(proto),
             normalize_string(px, length, banner_buffer, sizeof(banner_buffer))
     );
 }

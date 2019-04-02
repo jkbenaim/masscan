@@ -119,6 +119,9 @@ struct Output
         char *stylesheet;
     } xml;
     struct {
+	unsigned in_transaction:1;
+	unsigned rows_this_transaction;
+	unsigned rows_per_transaction;
     } sqlite;
 };
 
