@@ -47,7 +47,13 @@ sqlite_out_open(struct Output *out, FILE *fp)
 
 	fprintf(fp,
 		"PRAGMA jorunal_mode=WAL;\n"
+		"DROP TABLE IF EXISTS temp.vars;\n"
+		"CREATE TABLE temp.vars(\n"
+		"    key TEXT UNIQUE,\n"
+		"    val\n"
+		");\n"
 		"CREATE TABLE IF NOT EXISTS status(\n"
+		"    scan_id INTEGER,\n"
 		"    time INTEGER,\n"
 		"    ip TEXT,\n"
 		"    ip_proto INTEGER,\n"
@@ -57,6 +63,7 @@ sqlite_out_open(struct Output *out, FILE *fp)
 		"    reason TEXT\n"
 		");\n"
 		"CREATE TABLE IF NOT EXISTS banners(\n"
+		"    scan_id INTEGER,\n"
 		"    time INTEGER,\n"
 		"    ip TEXT,\n"
 		"    ip_proto INTEGER,\n"
@@ -66,9 +73,11 @@ sqlite_out_open(struct Output *out, FILE *fp)
 		"    px TEXT\n"
 		");\n"
 		"CREATE TABLE IF NOT EXISTS scans(\n"
-		"    scan_id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-		"    time INTEGER\n"
+		"    dummy INTEGER\n"
 		");\n"
+		"INSERT INTO scans VALUES(0);\n"
+		"INSERT INTO temp.vars(key,val) SELECT 'scan_id', last_insert_rowid();\n"
+
 	);
 
 	sqlite_out_tr_continue(out, fp, 0);
@@ -102,7 +111,7 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 
     sqlite_out_tr_continue(out, fp, 1);
 
-    fprintf(fp, "INSERT INTO status VALUES(%ld, \"%s\", %u, %u, %u, %d, \"%s\");\n",
+    fprintf(fp, "INSERT INTO status SELECT val, %ld, \"%s\", %u, %u, %u, %d, \"%s\" FROM temp.vars WHERE key=='scan_id';\n",
             timestamp,
             ip_string,
             ip_proto,
@@ -131,7 +140,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 
     sqlite_out_tr_continue(out, fp, 1);
     
-    fprintf(fp, "INSERT INTO banners VALUES(%ld, \"%s\", %u, %u, %u, \"%s\", \"%s\");\n",
+    fprintf(fp, "INSERT INTO banners SELECT val, %ld, \"%s\", %u, %u, %u, \"%s\", \"%s\" FROM temp.vars WHERE key=='scan_id';\n",
             timestamp,
             ip_string,
             ip_proto,
