@@ -108,7 +108,7 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 
     sqlite_out_tr_continue(out, fp, 1);
 
-    fprintf(fp, "INSERT INTO sense SELECT val, %ld, \"%s\", %u, %u, %u, \"%s\", null FROM temp.vars WHERE key=='scan_id';\n",
+    fprintf(fp, "INSERT INTO sense(scan_id, time, ip, ip_proto, port, ttl, proto, px) SELECT val, %ld, \"%s\", %u, %u, %u, \"%s\", null FROM temp.vars WHERE key=='scan_id';\n",
             timestamp,
             ip_string,
             ip_proto,
@@ -136,7 +136,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 
     sqlite_out_tr_continue(out, fp, 1);
     
-    fprintf(fp, "INSERT INTO sense SELECT val, %ld, \"%s\", %u, %u, %u, \"%s\", \"%s\" FROM temp.vars WHERE key=='scan_id';\n",
+    fprintf(fp, "INSERT INTO sense(scan_id, time, ip, ip_proto, port, ttl, proto, px) SELECT val, %ld, \"%s\", %u, %u, %u, \"%s\", \"%s\" FROM temp.vars WHERE key=='scan_id';\n",
             timestamp,
             ip_string,
             ip_proto,
