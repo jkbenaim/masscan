@@ -86,9 +86,9 @@ static void
 sqlite_out_close(struct Output *out, FILE *fp)
 {
 	sqlite_out_tr_end(out, fp);
-	fprintf(fp,
+	/*fprintf(fp,
 	"INSERT INTO scan_params(scan_id, key, val) SELECT temp.vars.val, 'time', MIN(sense.time) FROM temp.vars, sense WHERE sense.scan_id == (SELECT val FROM temp.vars WHERE key=='scan_id');"
-	);
+	);*/
 }
 
 /****************************************************************************
