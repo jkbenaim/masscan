@@ -53,6 +53,7 @@ sqlite_out_open(struct Output *out, FILE *fp)
 		"    val\n"
 		");\n"
 		"CREATE TABLE IF NOT EXISTS sense(\n"
+		"    sense_id INTEGER PRIMARY KEY,\n"
 		"    scan_id INTEGER,\n"
 		"    time INTEGER,\n"
 		"    ip TEXT,\n"
