@@ -66,11 +66,6 @@ sqlite_out_open(struct Output *out, FILE *fp)
 		"CREATE TABLE IF NOT EXISTS scans(\n"
 		"    version INT\n"
 		");\n"
-		"CREATE TABLE IF NOT EXISTS scan_params(\n"
-		"    scan_id INT,\n"
-		"    key TEXT,\n"
-		"    val TEXT\n"
-		");\n"
 		"INSERT INTO scans(version) VALUES(0);\n"
 		"INSERT INTO temp.vars(key,val) SELECT 'scan_id', last_insert_rowid();\n"
 
@@ -86,9 +81,6 @@ static void
 sqlite_out_close(struct Output *out, FILE *fp)
 {
 	sqlite_out_tr_end(out, fp);
-	/*fprintf(fp,
-	"INSERT INTO scan_params(scan_id, key, val) SELECT temp.vars.val, 'time', MIN(sense.time) FROM temp.vars, sense WHERE sense.scan_id == (SELECT val FROM temp.vars WHERE key=='scan_id');"
-	);*/
 }
 
 /****************************************************************************
