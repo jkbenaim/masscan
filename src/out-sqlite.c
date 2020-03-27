@@ -89,15 +89,9 @@ static void
 sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
     int status, unsigned ip, unsigned ip_proto, unsigned port, unsigned reason, unsigned ttl)
 {
-    uint8_t ip_bytes[4];
-    char ip_string[16];
-    unsigned temp = htonl(ip);
-    memcpy(&ip_bytes, &temp, 4);
-    
     char reason_buffer[128];
     
     reason_string(reason, reason_buffer, sizeof(reason_buffer)),
-    snprintf((char *)&ip_string, 16, "%u.%u.%u.%u", ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]);
 
     sqlite_out_tr_continue(out, fp, 1);
 
@@ -120,11 +114,6 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
         enum ApplicationProtocol proto, unsigned ttl,
         const unsigned char *px, unsigned length)
 {
-    uint8_t ip_bytes[4];
-    char ip_string[16];
-    unsigned temp = htonl(ip);
-    memcpy(&ip_bytes, &temp, 4);
-    snprintf((char *)&ip_string, 16, "%u.%u.%u.%u", ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]);
     char banner_buffer[131072];
 
     sqlite_out_tr_continue(out, fp, 1);
