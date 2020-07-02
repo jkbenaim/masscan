@@ -1,6 +1,4 @@
-ifneq (, $(shell which clang))
-CC = clang
-else ifneq (, $(shell which gcc))
+ifneq (, $(shell which gcc))
 CC = gcc
 else
 CC = cc
@@ -79,7 +77,7 @@ endif
 
 
 DEFINES = 
-CFLAGS = -g -ggdb $(FLAGS2) $(INCLUDES) $(DEFINES) -Wall -O2
+CFLAGS = -g -ggdb $(FLAGS2) $(INCLUDES) $(DEFINES) -Wall -O2 -std=gnu2x
 .SUFFIXES: .c .cpp
 
 all: bin/masscan 
