@@ -433,8 +433,6 @@ parse_file(struct Output *out, const char *filename,
                 goto end;
         }
         total_records++;
-        if ((total_records & 0xFFFF) == 0)
-            fprintf(stderr, "%s: %8" PRIu64 "\r", filename, total_records);
     }
 
 end:
