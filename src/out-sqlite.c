@@ -23,26 +23,26 @@ struct db_stmt_s {
 		.id = STMT_INIT,
 		.sqltext =
 		R"STATEMENT(
-			PRAGMA journal_mode=WAL;
-			CREATE TABLE IF NOT EXISTS sense (
-				sense_id INTEGER PRIMARY KEY,
-				scan_id,
-				time,
-				ip,
-				ip_proto,
-				port,
-				ttl,
-				proto,
-				px
-			);
-			CREATE TABLE IF NOT EXISTS scans(
-				scan_id INTEGER PRIMARY KEY,
-				version,
-				station,
-				start,
-				end,
-				filename
-			);
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS sense (
+	sense_id INTEGER PRIMARY KEY,
+	scan_id,
+	time,
+	ip,
+	ip_proto,
+	port,
+	ttl,
+	proto,
+	px
+);
+CREATE TABLE IF NOT EXISTS scans(
+	scan_id INTEGER PRIMARY KEY,
+	version,
+	station,
+	start,
+	end,
+	filename
+);
 		)STATEMENT",
 	},
 	{
