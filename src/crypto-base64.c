@@ -131,8 +131,8 @@ base64_decode(void *vdst, size_t sizeof_dst,
 
 		/* byte#2 */
 		b = (c<<4) & 0xF0;
-		while (i<sizeof_src && src[i] != '=' && (c = rstr[src[i]]) > 64)
-			;
+		if (i<sizeof_src && src[i] != '=' && (c = rstr[src[i]]) > 64)
+			return 0;
 		if (src[i] == '=' || i++ >= sizeof_src)
 			break;
 		b |= (c>>2) & 0x0F;
@@ -143,8 +143,8 @@ base64_decode(void *vdst, size_t sizeof_dst,
 
 		/* byte#3*/
 		b = (c<<6) & 0xC0;
-		while (i<sizeof_src && src[i] != '=' && (c = rstr[src[i]]) > 64)
-			;
+		if (i<sizeof_src && src[i] != '=' && (c = rstr[src[i]]) > 64)
+			return 0;
 		if (src[i] == '=' || i++ >= sizeof_src)
 			break;
 		b |= c;
