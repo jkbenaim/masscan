@@ -415,7 +415,8 @@ output_create(const struct Masscan *masscan, unsigned thread_index)
     out->format = masscan->output.format;
     switch (out->format) {
     case Output_SQLite:
-        out-> funcs = &sqlite_output;
+        out->funcs = &sqlite_output;
+	out->is_append = 1;
         break;
     case Output_List:
         out->funcs = &text_output;

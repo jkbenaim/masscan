@@ -1,39 +1,95 @@
 #include <arpa/inet.h>  /* for ntohl() */
+#include "sqlite3.h"
 #include "output.h"
 #include "masscan-app.h"
 #include "masscan-status.h"
 #include "out-record.h"
 #include "string_s.h"
+#include "crypto-base64.h"
 
-static void sqlite_out_tr_end(struct Output *out, FILE *fp)
-{
-	if(out->sqlite.in_transaction) {
-		fprintf(fp, "END;\n");
-		out->sqlite.in_transaction = 0;
-	}
-}
+enum STMT_ID_e {
+	STMT_INIT = 0,
+	STMT_NEW_SCAN,
+	STMT_ADD_SENSE,
+	STMT_SET_SCAN_TIMES,
+};
 
-static void sqlite_out_tr_continue(struct Output *out, FILE *fp, unsigned rows)
-{
-	if((out->sqlite.rows_this_transaction >= out->sqlite.rows_per_transaction)
-		&& out->sqlite.in_transaction) {
-		fprintf(fp, "END;\n");
-		out->sqlite.rows_this_transaction = 0;
-		out->sqlite.in_transaction = 0;
+struct db_stmt_s {
+	enum STMT_ID_e id;
+	const char *sqltext;
+	sqlite3_stmt *stmt;
+} stmts[] = {
+	{
+		.id = STMT_INIT,
+		.sqltext =
+		R"STATEMENT(
+			PRAGMA journal_mode=WAL;
+			CREATE TABLE IF NOT EXISTS sense (
+				sense_id INTEGER PRIMARY KEY,
+				scan_id,
+				time,
+				ip,
+				ip_proto,
+				port,
+				ttl,
+				proto,
+				px
+			);
+			CREATE TABLE IF NOT EXISTS scans(
+				scan_id INTEGER PRIMARY KEY,
+				version,
+				station,
+				start,
+				end,
+				filename
+			);
+		)STATEMENT",
+	},
+	{
+		.id = STMT_NEW_SCAN,
+		.sqltext = "INSERT INTO scans(version, station, filename) VALUES(:version, :station, :filename);",
+	},
+	{
+		.id = STMT_ADD_SENSE,
+		.sqltext = R"STATEMENT(
+			INSERT INTO sense(
+				scan_id,
+				time,
+				ip,
+				ip_proto,
+				port,
+				ttl,
+				proto,
+				px)
+			VALUES(
+				:scan_id,
+				:time,
+				:ip,
+				:ip_proto,
+				:port,
+				:ttl,
+				:proto,
+				:px
+			);
+		)STATEMENT",
+	},
+	{
+		.id = STMT_SET_SCAN_TIMES,
+		.sqltext = "UPDATE scans SET start=:start, end=:end WHERE scan_id=:scan_id;",
+	},
+	{
+		// sentinel
+		.sqltext = NULL,
 	}
-	if(!out->sqlite.in_transaction) {
-		fprintf(fp, "BEGIN;\n");
-		out->sqlite.in_transaction = 1;
-	}
-	out->sqlite.rows_this_transaction += rows;
-}
+};
+
 
 /****************************************************************************
  ****************************************************************************/
 static void
 *sqlite_out_create(struct Output *out)
 {
-    return NULL;
+	return NULL;
 }
 
 /****************************************************************************
@@ -41,42 +97,120 @@ static void
 static void
 sqlite_out_open(struct Output *out, FILE *fp)
 {
-	out->sqlite.in_transaction = 0;
-	out->sqlite.rows_per_transaction = 100000;
-	out->sqlite.rows_this_transaction = 0;
+	__label__ out_return;
+	int rc;
+	char *zErr = NULL;
+	char *zErr2 = NULL;
 
-	fprintf(fp,
-		"PRAGMA jorunal_mode=WAL;\n"
-		"DROP TABLE IF EXISTS temp.vars;\n"
-		"CREATE TABLE temp.vars(\n"
-		"    key TEXT UNIQUE,\n"
-		"    val\n"
-		");\n"
-		"CREATE TABLE IF NOT EXISTS sense(\n"
-		"    sense_id INTEGER PRIMARY KEY,\n"
-		"    scan_id INT,\n"
-		"    time INT,\n"
-		"    ip INT,\n"
-		"    ip_proto INT,\n"
-		"    port INT,\n"
-		"    ttl INT,\n"
-		"    proto TEXT,\n"
-		"    px TEXT\n"
-		");\n"
-		"CREATE TABLE IF NOT EXISTS scans(\n"
-		"    scan_id INTEGER PRIMARY KEY,\n"
-		"    version INT,\n"
-		"    station TEXT,\n"
-		"    start INT,\n"
-		"    end INT,\n"
-		"    filename TEXT\n"
-		");\n"
-		"INSERT INTO scans(version) VALUES(0);\n"
-		"INSERT INTO temp.vars(key,val) SELECT 'scan_id', last_insert_rowid();\n"
+	out->is_first_record_seen = 0;
 
+	rc = sqlite3_config(SQLITE_CONFIG_URI, 0);
+	if (rc != SQLITE_OK) {
+		zErr = "couldn't config to disable URI support";
+		goto out_return;
+	}
+
+	rc = sqlite3_open_v2(out->filename, &out->sqlite.db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
+	if (rc != SQLITE_OK) {
+		zErr = "in sqlite3_open";
+		goto out_return;
+	}
+
+	// exec the init statement
+	rc = sqlite3_exec(
+		out->sqlite.db,
+		stmts[0].sqltext,
+		NULL,
+		NULL,
+		&zErr2
 	);
+	if (rc != SQLITE_OK) {
+		zErr = "while executing init statement: ";
+		goto out_return;
+	}
 
-	sqlite_out_tr_continue(out, fp, 0);
+	for (enum STMT_ID_e i = 0; stmts[i].sqltext; i++) {
+		rc = sqlite3_prepare_v2(
+			out->sqlite.db,
+			stmts[i].sqltext,
+			-1,
+			&stmts[i].stmt,
+			NULL
+		);
+		if (rc != SQLITE_OK) {
+			zErr = "in prepare";
+			goto out_return;
+		}
+	}
+
+	// add row to scans table to get scan_id. we will fill in other info later
+	struct db_stmt_s *s = &stmts[STMT_NEW_SCAN];
+
+	// scan version
+	rc = sqlite3_bind_int(s->stmt, 1, 0);
+	if (rc != SQLITE_OK) {
+		zErr = "in new scan bind version";
+		goto out_return;
+	}
+
+	// scan station
+	rc = sqlite3_bind_null(s->stmt, 2);
+	if (rc != SQLITE_OK) {
+		zErr = "in new scan bind station";
+		goto out_return;
+	}
+
+	// scan filename
+	rc = sqlite3_bind_null(s->stmt, 3);
+	if (rc != SQLITE_OK) {
+		zErr = "in new scan bind filename";
+		goto out_return;
+	}
+
+	// step the statement
+	rc = sqlite3_step(s->stmt);
+	if (rc != SQLITE_DONE) {
+		zErr = "in new scan step";
+		goto out_return;
+	}
+
+	// retrieve the scan_id, which is the rowid of the last insert
+	out->sqlite.scan_id = sqlite3_last_insert_rowid(out->sqlite.db);
+
+	// reset and clear binds on previous statement
+	rc = sqlite3_reset(s->stmt);
+	if (rc != SQLITE_OK) {
+		zErr = "in new scan reset";
+		goto out_return;
+	}
+	rc = sqlite3_clear_bindings(s->stmt);
+	// fun fact, the return value of sqlite3_clear_bindings is not
+	// defined in the sqlite documentation.
+	
+
+	// begin a transaction
+	rc = sqlite3_exec(
+		out->sqlite.db,
+		"BEGIN;",
+		NULL,
+		NULL,
+		NULL
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "beginning transaction";
+		goto out_return;
+	}
+
+out_return:
+	if (zErr) {
+		fprintf(stderr, "%s: error: %s%s\n",
+			__FUNCTION__,
+			zErr,
+			zErr2?:""
+		);
+		if (zErr2) sqlite3_free(zErr2);
+		exit(1);
+	}
 }
 
 
@@ -85,7 +219,81 @@ sqlite_out_open(struct Output *out, FILE *fp)
 static void
 sqlite_out_close(struct Output *out, FILE *fp)
 {
-	sqlite_out_tr_end(out, fp);
+	__label__ out_return;
+	int rc;
+	char *zErr = NULL;
+
+	// set scan start/end times
+	struct db_stmt_s *s = &stmts[STMT_SET_SCAN_TIMES];
+
+	// bind start time
+	rc = sqlite3_bind_int64(
+		s->stmt,
+		1,
+		out->sqlite.t_min
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind start time";
+		goto out_return;
+	}
+
+	// bind end time
+	rc = sqlite3_bind_int64(
+		s->stmt,
+		2,
+		out->sqlite.t_max
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind end time";
+		goto out_return;
+	}
+
+	// bind scan_id
+	rc = sqlite3_bind_int64(
+		s->stmt,
+		3,
+		out->sqlite.scan_id
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind scan_id";
+		goto out_return;
+	}
+
+	// step statement
+	rc = sqlite3_step(s->stmt);
+	if (rc != SQLITE_DONE) {
+		zErr = "in step";
+		goto out_return;
+	}
+
+	rc = sqlite3_reset(s->stmt);
+	if (rc != SQLITE_OK) {
+		zErr = "in reset";
+		goto out_return;
+	}
+	rc = sqlite3_clear_bindings(s->stmt);
+
+	// commit transaction
+	rc = sqlite3_exec(
+		out->sqlite.db,
+		"COMMIT;",
+		NULL,
+		NULL,
+		NULL
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "commiting transaction";
+		goto out_return;
+	}
+
+out_return:
+	if (zErr) {
+		fprintf(stderr, "%s: error: %s\n",
+			__FUNCTION__,
+			zErr
+		);
+		exit(1);
+	}
 }
 
 /****************************************************************************
@@ -94,20 +302,132 @@ static void
 sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
     int status, unsigned ip, unsigned ip_proto, unsigned port, unsigned reason, unsigned ttl)
 {
-    char reason_buffer[128];
-    
-    reason_string(reason, reason_buffer, sizeof(reason_buffer)),
+	__label__ out_return;
+	int rc;
+	char *zErr = NULL;
 
-    sqlite_out_tr_continue(out, fp, 1);
+	struct db_stmt_s *s = &stmts[STMT_ADD_SENSE];
 
-    fprintf(fp, "INSERT INTO sense(scan_id, time, ip, ip_proto, port, ttl, proto, px) SELECT val, %ld, %u, %u, %u, %u, '%s', null FROM temp.vars WHERE key=='scan_id';\n",
-            timestamp,
-            ip,
-            ip_proto,
-            port,
-            ttl,
-            reason_buffer
-    );
+	// update min/max observed times for this scan
+	if (!out->is_first_record_seen) {
+		out->is_first_record_seen = 1;
+		out->sqlite.t_min = timestamp;
+		out->sqlite.t_max = timestamp;
+	} else {
+		if (timestamp < out->sqlite.t_min)
+			out->sqlite.t_min = timestamp;
+		if (timestamp > out->sqlite.t_max)
+			out->sqlite.t_max = timestamp;
+	}
+
+	// bind all the things...
+	rc = sqlite3_bind_int(
+		s->stmt,
+		1,
+		out->sqlite.scan_id
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind scan_id";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int64(
+		s->stmt,
+		2,
+		timestamp
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind timestamp";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int64(
+		s->stmt,
+		3,
+		ip
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind ip";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int(
+		s->stmt,
+		4,
+		ip_proto
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind ip_proto";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int(
+		s->stmt,
+		5,
+		port
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind port";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int(
+		s->stmt,
+		6,
+		ttl
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind ttl";
+		goto out_return;
+	}
+
+	char reason_buffer[128];
+	reason_string(reason, reason_buffer, sizeof(reason_buffer));
+
+	rc = sqlite3_bind_text(
+		s->stmt,
+		7,
+		reason_buffer,
+		-1,
+		SQLITE_STATIC
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind proto";
+		goto out_return;
+	}
+
+	// bind px = null
+	rc = sqlite3_bind_null(
+		s->stmt,
+		8
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind px (null)";
+		goto out_return;
+	}
+
+	// step the statement
+	rc = sqlite3_step(s->stmt);
+	if (rc != SQLITE_DONE) {
+		zErr = "in step";
+		goto out_return;
+	}
+
+	// reset and clear binds
+	rc = sqlite3_reset(s->stmt);
+	if (rc != SQLITE_OK) {
+		zErr = "in reset";
+		goto out_return;
+	}
+	rc = sqlite3_clear_bindings(s->stmt);
+
+out_return:
+	if (zErr) {
+		fprintf(stderr, "%s: error: %s\n",
+			__FUNCTION__,
+			zErr
+		);
+	}
 }
 
 
@@ -119,19 +439,179 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
         enum ApplicationProtocol proto, unsigned ttl,
         const unsigned char *px, unsigned length)
 {
-    char banner_buffer[131072];
+	__label__ out_return;
+	int rc;
+	char *zErr = NULL;
 
-    sqlite_out_tr_continue(out, fp, 1);
-    
-    fprintf(fp, "INSERT INTO sense(scan_id, time, ip, ip_proto, port, ttl, proto, px) SELECT val, %ld, %u, %u, %u, %u, '%s', '%s' FROM temp.vars WHERE key=='scan_id';\n",
-            timestamp,
-            ip,
-            ip_proto,
-            port,
-            ttl,
-            masscan_app_to_string(proto),
-            normalize_string(px, length, banner_buffer, sizeof(banner_buffer))
-    );
+	struct db_stmt_s *s = &stmts[STMT_ADD_SENSE];
+
+	// update min/max observed times for this scan
+	if (!out->is_first_record_seen) {
+		out->is_first_record_seen = 1;
+		out->sqlite.t_min = timestamp;
+		out->sqlite.t_max = timestamp;
+	} else {
+		if (timestamp < out->sqlite.t_min)
+			out->sqlite.t_min = timestamp;
+		if (timestamp > out->sqlite.t_max)
+			out->sqlite.t_max = timestamp;
+	}
+
+	// bind all the things...
+	rc = sqlite3_bind_int(
+		s->stmt,
+		1,
+		out->sqlite.scan_id
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind scan_id";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int64(
+		s->stmt,
+		2,
+		timestamp
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind timestamp";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int64(
+		s->stmt,
+		3,
+		ip
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind ip";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int(
+		s->stmt,
+		4,
+		ip_proto
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind ip_proto";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int(
+		s->stmt,
+		5,
+		port
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind port";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int(
+		s->stmt,
+		6,
+		ttl
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind ttl";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_text(
+		s->stmt,
+		7,
+		masscan_app_to_string(proto),
+		-1,
+		SQLITE_STATIC
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind proto";
+		goto out_return;
+	}
+
+	// for px we need some extra logic.
+	// sometimes the px field comes to us base64-encoded. we want to
+	// undo that.
+	
+	switch(proto) {
+	case PROTO_X509_CERT:
+	case PROTO_UDP_ZEROACCESS:
+	{
+		uint8_t *pxbuf = NULL;
+		size_t pxbuf_len = 0;
+
+		//pxbuf_len = length;
+		pxbuf_len = 0;
+		pxbuf = malloc(pxbuf_len);
+		if (!pxbuf) {
+			zErr = "allocating pxbuf";
+			goto out_return;
+		}
+		if (pxbuf_len != 0)
+			pxbuf_len = base64_decode(pxbuf, length, px, length);
+		if (pxbuf_len == 0) {
+			rc = sqlite3_bind_null(
+				s->stmt,
+				8
+			);
+		} else {
+			if (!pxbuf) {
+				zErr = "reallocating pxbuf";
+				goto out_return;
+			}
+
+			rc = sqlite3_bind_blob(
+				s->stmt,
+				8,
+				pxbuf,
+				pxbuf_len,
+				free
+			);
+		}
+		if (rc != SQLITE_OK) {
+			zErr = "in bind px";
+			goto out_return;
+		}
+	}
+		break;
+	default:
+		rc = sqlite3_bind_text(
+			s->stmt,
+			8,
+			(const char *)px,
+			length,
+			SQLITE_TRANSIENT
+		);
+		if (rc != SQLITE_OK) {
+			zErr = "in bind px";
+			goto out_return;
+		}
+		break;
+	}
+
+	// step the statement
+	rc = sqlite3_step(s->stmt);
+	if (rc != SQLITE_DONE) {
+		zErr = "in step";
+		goto out_return;
+	}
+
+	// reset and clear binds
+	rc = sqlite3_reset(s->stmt);
+	if (rc != SQLITE_OK) {
+		zErr = "in reset";
+		goto out_return;
+	}
+	rc = sqlite3_clear_bindings(s->stmt);
+
+out_return:
+	if (zErr) {
+		fprintf(stderr, "%s: error: %s\n",
+			__FUNCTION__,
+			zErr
+		);
+	}
 }
 
 

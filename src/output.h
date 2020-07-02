@@ -7,6 +7,7 @@
 #include "main-src.h"
 #include "unusedparm.h"
 #include "masscan-app.h"
+#include "sqlite3.h"
 
 struct Masscan;
 struct Output;
@@ -119,9 +120,10 @@ struct Output
         char *stylesheet;
     } xml;
     struct {
-	unsigned in_transaction:1;
-	unsigned rows_this_transaction;
-	unsigned rows_per_transaction;
+        sqlite3 *db;
+	sqlite3_int64 scan_id;
+	time_t t_min;
+	time_t t_max;
     } sqlite;
 };
 
