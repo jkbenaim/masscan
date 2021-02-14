@@ -57,7 +57,7 @@ parse_state_machine(struct Output *out, const unsigned char *px, size_t length)
             state = NUMBER;
             break;
         default:
-            LOG(0, "redis: unexpected data: %.*s\n", length-i, px+i);
+            LOG(0, "redis: unexpected data: %.*s\n", (int)(length-i), px+i);
             exit(1);
             break;
         }
@@ -73,7 +73,7 @@ parse_state_machine(struct Output *out, const unsigned char *px, size_t length)
             }
             out->redis.outstanding--;
         } else {
-            LOG(0, "redis: unexpected data: %.*s\n", length-i, px+i);
+            LOG(0, "redis: unexpected data: %.*s\n", (int)(length-i), px+i);
             exit(1);
         }
         break;
@@ -89,7 +89,7 @@ parse_state_machine(struct Output *out, const unsigned char *px, size_t length)
                 return 1;
             }
         } else {
-            LOG(0, "redis: unexpected data: %.*s\n", length-i, px+i);
+            LOG(0, "redis: unexpected data: %.*s\n", (int)(length-i), px+i);
             exit(1);
         }
     default:
@@ -179,14 +179,14 @@ redis_out_close(struct Output *out, FILE *fp)
 
     UNUSEDPARM(out);
 
-    count = send((SOCKET)fd, "PING\r\n", 6, 0);
+    count = send((SOCKET)fd, "QUIT\r\n", 6, 0);
     if (count != 6) {
-        LOG(0, "redis: send(ping) failed\n");
+        LOG(0, "redis: send(quit) failed\n");
         exit(1);
     }
 
     count = recv_line((SOCKET)fd, line, sizeof(line));
-    if (count != 7 && memcmp(line, "+PONG\r\n", 7) != 0) {
+    if ((count != 5 && memcmp(line, "+OK\r\n", 5) != 0) && (count != 4 && memcmp(line, ":0\r\n", 4) != 0)){
         LOG(0, "redis: unexpected response from redis server: %s\n", line);
         exit(1);
     }
@@ -196,21 +196,22 @@ redis_out_close(struct Output *out, FILE *fp)
  ****************************************************************************/
 static void
 redis_out_status(struct Output *out, FILE *fp, time_t timestamp,
-    int status, unsigned ip, unsigned ip_proto, unsigned port, unsigned reason, unsigned ttl)
+    int status, ipaddress ip, unsigned ip_proto, unsigned port, unsigned reason, unsigned ttl)
 {
     ptrdiff_t fd = (ptrdiff_t)fp;
     char line[1024];
-    char ip_string[16];
+    int line_length;
+    char ip_string[64];
     char port_string[10];
+    int ip_string_length;
+    int port_string_length;
     size_t count;
     char values[64];
+    int values_length;
+    ipaddress_formatted_t fmt = ipaddress_fmt(ip);
 
-    sprintf_s(ip_string, sizeof(ip_string), "%u.%u.%u.%u",
-        (unsigned char)(ip>>24),
-        (unsigned char)(ip>>16),
-        (unsigned char)(ip>> 8),
-        (unsigned char)(ip>> 0));
-    sprintf_s(port_string, sizeof(port_string), "%u/%s", port, name_from_ip_proto(ip_proto));
+    ip_string_length = sprintf_s(ip_string, sizeof(ip_string), "%s", fmt.string);
+    port_string_length = sprintf_s(port_string, sizeof(port_string), "%u/%s", port, name_from_ip_proto(ip_proto));
 
 /**3
 $3
@@ -228,11 +229,11 @@ myvalue
     sprintf_s(line, sizeof(line),
             "*3\r\n"
             "$4\r\nSADD\r\n"
-            "$%u\r\n%s\r\n"
-            "$%u\r\n%s\r\n"
+            "$%d\r\n%s\r\n"
+            "$%d\r\n%s\r\n"
             ,
-            (unsigned)strlen("host"), "host",
-            (unsigned)strlen(ip_string), ip_string
+            4, "host",
+            ip_string_length, ip_string
             );
 
     count = send((SOCKET)fd, line, (int)strlen(line), 0);
@@ -249,11 +250,11 @@ myvalue
     sprintf_s(line, sizeof(line),
             "*3\r\n"
             "$4\r\nSADD\r\n"
-            "$%u\r\n%s\r\n"
-            "$%u\r\n%s\r\n"
+            "$%d\r\n%s\r\n"
+            "$%d\r\n%s\r\n"
             ,
-            (unsigned)strlen(ip_string), ip_string,
-            (unsigned)strlen(port_string), port_string);
+            ip_string_length, ip_string,
+            port_string_length, port_string);
 
     count = send((SOCKET)fd, line, (int)strlen(line), 0);
     if (count != strlen(line)) {
@@ -267,21 +268,21 @@ myvalue
      * KEY: ip:port
      * VALUE: timestamp:status:reason:ttl
      */
-    sprintf_s(values, sizeof(values), "%u:%u:%u:%u",
+    values_length = sprintf_s(values, sizeof(values), "%u:%u:%u:%u",
         (unsigned)timestamp, status, reason, ttl);
-    sprintf_s(line, sizeof(line),
+    line_length = sprintf_s(line, sizeof(line),
             "*3\r\n"
             "$4\r\nSADD\r\n"
-            "$%u\r\n%s:%s\r\n"
-            "$%u\r\n%s\r\n"
+            "$%d\r\n%s:%s\r\n"
+            "$%d\r\n%s\r\n"
             ,
-            (unsigned)(strlen(ip_string) + 1 + strlen(port_string)),
-            ip_string,port_string,
-            (unsigned)strlen(values), values
+            ip_string_length + 1 + port_string_length,
+            ip_string, port_string,
+            values_length, values
             );
 
-    count = send((SOCKET)fd, line, (int)strlen(line), 0);
-    if (count != strlen(line)) {
+    count = send((SOCKET)fd, line, (int)line_length, 0);
+    if (count != (size_t)line_length) {
         LOG(0, "redis: error sending data\n");
         exit(1);
     }
@@ -295,7 +296,7 @@ myvalue
  ****************************************************************************/
 static void
 redis_out_banner(struct Output *out, FILE *fp, time_t timestamp,
-        unsigned ip, unsigned ip_proto, unsigned port,
+        ipaddress ip, unsigned ip_proto, unsigned port,
         enum ApplicationProtocol proto, unsigned ttl,
         const unsigned char *px, unsigned length)
 {

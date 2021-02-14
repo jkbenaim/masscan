@@ -300,13 +300,18 @@ out_return:
  ****************************************************************************/
 static void
 sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
-    int status, unsigned ip, unsigned ip_proto, unsigned port, unsigned reason, unsigned ttl)
+    int status, ipaddress ip, unsigned ip_proto, unsigned port, unsigned reason, unsigned ttl)
 {
 	__label__ out_return;
 	int rc;
 	char *zErr = NULL;
 
 	struct db_stmt_s *s = &stmts[STMT_ADD_SENSE];
+
+	if (ip.version != 4) {
+		zErr = "only ipv4 supported";
+		goto out_return;
+	}
 
 	// update min/max observed times for this scan
 	if (!out->is_first_record_seen) {
@@ -344,7 +349,7 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 	rc = sqlite3_bind_int64(
 		s->stmt,
 		3,
-		ip
+		ip.ipv4
 	);
 	if (rc != SQLITE_OK) {
 		zErr = "in bind ip";
@@ -435,7 +440,7 @@ out_return:
  ****************************************************************************/
 static void
 sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
-        unsigned ip, unsigned ip_proto, unsigned port,
+        ipaddress ip, unsigned ip_proto, unsigned port,
         enum ApplicationProtocol proto, unsigned ttl,
         const unsigned char *px, unsigned length)
 {
@@ -444,6 +449,11 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 	char *zErr = NULL;
 
 	struct db_stmt_s *s = &stmts[STMT_ADD_SENSE];
+
+	if (ip.version != 4) {
+		zErr = "only ipv4 supported";
+		goto out_return;
+	}
 
 	// update min/max observed times for this scan
 	if (!out->is_first_record_seen) {
@@ -481,7 +491,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 	rc = sqlite3_bind_int64(
 		s->stmt,
 		3,
-		ip
+		ip.ipv4
 	);
 	if (rc != SQLITE_OK) {
 		zErr = "in bind ip";

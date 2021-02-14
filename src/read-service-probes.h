@@ -4,7 +4,7 @@
 #ifndef READ_SERVICE_PROBES_H
 #define READ_SERVICE_PROBES_H
 #include <stdio.h>
-#include "ranges.h"
+#include "massip-rangesv4.h"
 
 /*
  Exclude <port specification>
@@ -59,6 +59,7 @@ struct ServiceProbeMatch {
     struct ServiceProbeMatch *next;
     char *service;
     char *regex;
+    size_t regex_length;
     struct ServiceVersionInfo *versioninfo;
     unsigned is_case_insensitive:1;
     unsigned is_include_newlines:1;

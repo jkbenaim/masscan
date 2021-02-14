@@ -33,7 +33,10 @@ enum ApplicationProtocol {
     PROTO_MEMCACHED,
     PROTO_SCRIPTING,
     PROTO_VERSIONING,
-    
+    PROTO_COAP,         /* constrained app proto, udp/5683, RFC7252 */
+    PROTO_TELNET,
+    PROTO_RDP,          /* Microsoft Remote Desktop Protocol tcp/3389 */
+    PROTO_HTTP_SERVER,  /* HTTP "Server:" field */
     
     PROTO_end_of_list /* must be last one */
 };

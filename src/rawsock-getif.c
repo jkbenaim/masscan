@@ -5,12 +5,11 @@
     This works on both Linux and windows.
 */
 #include "rawsock.h"
-#include "ranges.h" /*for parsing IPv4 addresses */
 #include "string_s.h"
 #include "util-malloc.h"
+#include "logger.h"
 
-
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__sun__)
 #include <unistd.h>
 #include <sys/socket.h>
 #include <net/route.h>
@@ -18,8 +17,20 @@
 #include <net/if_dl.h>
 #include <ctype.h>
 
-#define ROUNDUP(a)                           \
-((a) > 0 ? (1 + (((a) - 1) | (sizeof(int) - 1))) : sizeof(int))
+#define ROUNDUP2(a, n)       ((a) > 0 ? (1 + (((a) - 1U) | ((n) - 1))) : (n))
+
+#if defined(__APPLE__)
+# define ROUNDUP(a)           ROUNDUP2((a), sizeof(int))
+#elif defined(__NetBSD__)
+# define ROUNDUP(a)           ROUNDUP2((a), sizeof(uint64_t))
+#elif defined(__FreeBSD__)
+# define ROUNDUP(a)           ROUNDUP2((a), sizeof(int))
+#elif defined(__OpenBSD__)
+# define ROUNDUP(a)           ROUNDUP2((a), sizeof(int))
+#else
+# error unknown platform
+#endif
+
 
 static struct sockaddr *
 get_rt_address(struct rt_msghdr *rtm, int desired)
@@ -45,7 +56,7 @@ rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
 {
     int fd;
     int seq = (int)time(0);
-    size_t err;
+    ssize_t err;
     struct rt_msghdr *rtm;
     size_t sizeof_buffer;
 
@@ -54,38 +65,64 @@ rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
      * Requests/responses from the kernel are done with an "rt_msghdr"
      * structure followed by an array of "sockaddr" structures.
      */
-    sizeof_buffer = sizeof(*rtm) + sizeof(struct sockaddr_in)*16;
-    rtm = MALLOC(sizeof_buffer);
+    sizeof_buffer = sizeof(*rtm) + 512;
+    rtm = calloc(1, sizeof_buffer);
 
     /*
      * Create a socket for querying the kernel
      */
-    fd = socket(PF_ROUTE, SOCK_RAW, 0);
+    fd = socket(AF_ROUTE, SOCK_RAW, 0);
     if (fd < 0) {
         perror("socket(PF_ROUTE)");
         free(rtm);
         return errno;
     }
+    LOG(2, "[+] getif: got socket handle\n");
 
+    /* Needs a timeout. Sometimes it'll hang indefinitely waiting for a 
+     * response that will never arrive */
+    {
+        struct timeval timeout;      
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+
+        err = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+        if (err < 0)
+            LOG(0, "[-] SO_RCVTIMEO: %d %s\n", errno, strerror(errno));
+
+        err = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+        if (err < 0)
+            LOG(0, "[-] SO_SNDTIMEO: %d %s\n", errno, strerror(errno));
+   }
 
     /*
      * Format and send request to kernel
      */
-    memset(rtm, 0, sizeof_buffer);
-    rtm->rtm_msglen = sizeof_buffer;
-    rtm->rtm_type = RTM_GET;
-    rtm->rtm_flags = RTF_UP | RTF_GATEWAY;
+    rtm->rtm_msglen = sizeof(*rtm) + sizeof(struct sockaddr_in);
     rtm->rtm_version = RTM_VERSION;
+    rtm->rtm_flags = RTF_UP;
+    rtm->rtm_type = RTM_GET;
+    rtm->rtm_addrs = RTA_DST | RTA_IFP;
+    rtm->rtm_pid = getpid();
     rtm->rtm_seq = seq;
-    rtm->rtm_addrs = RTA_DST | RTA_NETMASK | RTA_GATEWAY | RTA_IFP;
 
-    err = write(fd, (char *)rtm, sizeof_buffer);
-    if (err != sizeof_buffer) {
-        perror("write(RTM_GET)");
-        printf("----%u %u\n", (unsigned)err, (unsigned)sizeof_buffer);
-        close(fd);
-        free(rtm);
-        return -1;
+    /*
+     * Create an empty address of 0.0.0.0
+     */
+    {
+        struct sockaddr_in *sin;
+        sin = (struct sockaddr_in *)(rtm + 1);
+        sin->sin_len = sizeof(*sin);
+        sin->sin_family = AF_INET;
+        sin->sin_addr.s_addr = 0;
+    }
+
+
+
+    err = write(fd, (char *)rtm, rtm->rtm_msglen);
+    if (err <= 0) {
+        LOG(0, "[-] getif: write(): returned %d %s\n", errno, strerror(errno));
+        goto fail;
     }
 
     /*
@@ -93,8 +130,13 @@ rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
      */
     for (;;) {
         err = read(fd, (char *)rtm, sizeof_buffer);
-        if (err <= 0)
-            break;
+        if (err <= 0) {
+            LOG(0, "[-] getif: read(): returned %d %s\n", errno, strerror(errno));
+            goto fail;
+        }
+
+        LOG(2, "[+] getif: got response, len=%d\n", err);
+
         if (rtm->rtm_seq != seq) {
             printf("seq: %u %u\n", rtm->rtm_seq, seq);
             continue;
@@ -106,15 +148,12 @@ rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
         break;
     }
     close(fd);
-
-    //hexdump(rtm+1, err-sizeof(*rtm));
-    //dump_rt_addresses(rtm);
+    fd = -1;
 
     /*
      * Parse our data
      */
     {
-        //struct sockaddr_in *sin;
         struct sockaddr_dl *sdl;
 
         sdl = (struct sockaddr_dl *)get_rt_address(rtm, RTA_IFP);
@@ -127,17 +166,12 @@ rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
             free(rtm);
             return 0;
         }
-
-        /*sin = (struct sockaddr_in *)get_rt_address(rtm, RTA_GATEWAY);
-        if (sin) {
-            *ipv4 = ntohl(sin->sin_addr.s_addr);
-            free(rtm);
-            return 0;
-        }*/
-
     }
 
+fail:
     free(rtm);
+    if (fd > 0)
+	close(fd);
     return -1;
 }
 
@@ -160,6 +194,7 @@ rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
 
 
 struct route_info {
+    int priority;
     struct in_addr dstAddr;
     struct in_addr srcAddr;
     struct in_addr gateWay;
@@ -226,22 +261,35 @@ static int parseRoutes(struct nlmsghdr *nlHdr, struct route_info *rtInfo)
     /* Attributes field*/
     rtAttr = (struct rtattr *)RTM_RTA(rtMsg);
     rtLen = RTM_PAYLOAD(nlHdr);
+#define FORMATADDR(n) ((n)&0xFF), ((n>>8)&0xFF), ((n>>16)&0xFF), ((n>>24)&0xFF)
     for (; RTA_OK(rtAttr, rtLen); rtAttr = RTA_NEXT(rtAttr, rtLen)) {
         switch (rtAttr->rta_type) {
         case RTA_OIF:
             if_indextoname(*(int *) RTA_DATA(rtAttr), rtInfo->ifName);
+            //LOG(4, "ifname=%s ", rtInfo->ifName);
             break;
         case RTA_GATEWAY:
             rtInfo->gateWay.s_addr = *(u_int *)RTA_DATA(rtAttr);
+            //LOG(4, "gw=%u.%u.%u.%u ", FORMATADDR(rtInfo->gateWay.s_addr));
             break;
         case RTA_PREFSRC:
             rtInfo->srcAddr.s_addr = *(u_int *)RTA_DATA(rtAttr);
+            //LOG(4, "src=%u.%u.%u.%u ", FORMATADDR(rtInfo->srcAddr.s_addr));
             break;
         case RTA_DST:
             rtInfo->dstAddr .s_addr = *(u_int *)RTA_DATA(rtAttr);
+            //LOG(4, "dst=%u.%u.%u.%u ", FORMATADDR(rtInfo->dstAddr.s_addr));
             break;
+        case RTA_PRIORITY:
+            rtInfo->priority = *(int*)RTA_DATA(rtAttr);
+            //LOG(4, "priority=0x%08x ", rtInfo->priority);
+            break;
+        default:
+            //LOG(4, "rta_type=%d ", rtAttr->rta_type)
+            ;
         }
     }
+    //LOG(4, "\n");
 
     return 0;
 }
@@ -255,6 +303,7 @@ int rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
     int len;
     int msgSeq = 0;
     unsigned ipv4 = 0;
+    int priority = 0x7FFFFF;
 
 
     /*
@@ -308,21 +357,32 @@ int rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
 
         memset(rtInfo, 0, sizeof(struct route_info));
 
+        //LOG(3, "if: nlmsg_type=%d nlmsg_flags=0x%x\n", nlMsg->nlmsg_type, nlMsg->nlmsg_flags);
         err = parseRoutes(nlMsg, rtInfo);
         if (err != 0)
             continue;
 
+        LOG(3, "if: route: '%12s' dst=%u.%u.%u.%u src=%u.%u.%u.%u gw=%u.%u.%u.%u priority=%d\n",
+                rtInfo->ifName,
+                FORMATADDR(rtInfo->dstAddr.s_addr),
+                FORMATADDR(rtInfo->srcAddr.s_addr),
+                FORMATADDR(rtInfo->gateWay.s_addr),
+                rtInfo->priority
+            );
 
         /* make sure destination = 0.0.0.0 for "default route" */
         if (rtInfo->dstAddr.s_addr != 0)
             continue;
 
         /* found the gateway! */
-        ipv4 = ntohl(rtInfo->gateWay.s_addr);
-        if (ipv4 == 0)
-            continue;
+        if (rtInfo->priority < priority) {
+            priority = rtInfo->priority;
+            ipv4 = ntohl(rtInfo->gateWay.s_addr);
+            if (ipv4 == 0)
+                continue;
+            strcpy_s(ifname, sizeof_ifname, rtInfo->ifName);
+        }
 
-        strcpy_s(ifname, sizeof_ifname, rtInfo->ifName);
     }
 
     close(fd);
@@ -336,6 +396,8 @@ int rawsock_get_default_interface(char *ifname, size_t sizeof_ifname)
 #if defined(WIN32)
 #include <winsock2.h>
 #include <iphlpapi.h>
+#include "massip-parse.h"
+
 #ifdef _MSC_VER
 #pragma comment(lib, "IPHLPAPI.lib")
 #endif
@@ -395,14 +457,12 @@ again:
         {
             const IP_ADDR_STRING *addr;
 
-            for (addr = &pAdapter->GatewayList;
-                    addr;
-                    addr = addr->Next) {
-                struct Range range;
+            for (addr = &pAdapter->GatewayList; addr; addr = addr->Next) {
+                unsigned x;
 
-                range = range_parse_ipv4(addr->IpAddress.String, 0, 0);
-                if (range.begin != 0 && range.begin == range.end) {
-                    ipv4 = range.begin;
+                x = massip_parse_ipv4(addr->IpAddress.String);
+                if (x != 0xFFFFFFFF) {
+                    ipv4 = x;
                     break;
                 }
             }

@@ -50,7 +50,7 @@ base64_encode(void *vdst, size_t sizeof_dst,
         dst[d+3] = '=';
         d += 4;
     } else if (i + 1 <= sizeof_src && d + 4 <= sizeof_dst) {
-        unsigned n = src[i]<<16 | src[i+1]<<8;
+        unsigned n = src[i]<<16;
         dst[d+0] = b64[ (n>>18) & 0x3F ];
         dst[d+1] = b64[ (n>>12) & 0x3F ];
         dst[d+2] = '=';
@@ -184,7 +184,6 @@ base64_selftest(void)
     char buf3[100];
     size_t buf_len;
     size_t buf2_len;
-    size_t buf3_len;
     unsigned i;
     unsigned seed = (unsigned)time(0);
 
@@ -201,6 +200,7 @@ base64_selftest(void)
      */
     for (i=0; i<100; i++) {
         unsigned j;
+        size_t buf3_len;
 
         /* create a string of random bytes */
         buf_len = r_rand(&seed) % 50;

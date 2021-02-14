@@ -30,6 +30,7 @@ struct Banner1
 
     unsigned is_capture_html:1;
     unsigned is_capture_cert:1;
+    unsigned is_capture_servername:1;
     unsigned is_capture_heartbleed:1;
     unsigned is_capture_ticketbleed:1;
     unsigned is_heartbleed:1;
@@ -209,6 +210,25 @@ struct SMBSTUFF {
     struct SpnegoDecode spnego;
 };
 
+struct RDPSTUFF {
+    unsigned short tpkt_length;
+    struct {
+        unsigned state;
+        unsigned short dstref;
+        unsigned short srcref;
+        unsigned char len;
+        unsigned char type;
+        unsigned char flags;
+    } cotp;
+    struct {
+        unsigned state;
+        unsigned result;
+        unsigned char type;
+        unsigned char flags;
+        unsigned char len;
+    } cc;
+};
+
 struct ProtocolState {
     unsigned state;
     unsigned remaining;
@@ -225,6 +245,7 @@ struct ProtocolState {
         struct POP3STUFF pop3;
         struct MEMCACHEDSTUFF memcached;
         struct SMBSTUFF smb;
+        struct RDPSTUFF rdp;
     } sub;
 };
 
@@ -265,11 +286,32 @@ struct ProtocolParserStream {
 };
 
 
+/**
+ * Patterns that match the data from the start of a TCP connection.
+ * This will hint at what protocol that connection might be.
+ */
 struct Patterns {
+    
+    /** A string like "SSH-" or "220 " that matches a banner */
     const char *pattern;
+    
+    /** The length of that string, since it may be binary containing
+     * nul characters */
     unsigned pattern_length;
+    
+    /** An integer arbitrarily assigned to this pattern, which should
+     * probably match the protocol ID that we are looking for */
     unsigned id;
+    
+    /**
+     * Whether this string matches only at the begining ('anchored')
+     * or anywhere in the input. Virtually all the patterns are anchored.
+     */
     unsigned is_anchored;
+    
+    /**
+     * Some extra flags for the pattern matcher for a few os the patterns.
+     */
     unsigned extra;
 };
 

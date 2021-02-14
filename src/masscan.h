@@ -1,21 +1,23 @@
 #ifndef MASSCAN_H
 #define MASSCAN_H
+#include "massip-addr.h"
 #include "string_s.h"
-#include "main-src.h"
+#include "stack-src.h"
+#include "massip.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
 
-#include "ranges.h"
-#include "packet-queue.h"
+#include "massip.h"
+#include "stack-queue.h"
 
 struct Adapter;
 struct TemplateSet;
 struct Banner1;
 
 /**
- * This is the "operationg" to be performed by masscan, which is almost always
+ * This is the "operation" to be performed by masscan, which is almost always
  * to "scan" the network. However, there are some lesser operations to do
  * instead, like run a "regression self test", or "debug", or something else
  * instead of scanning. We parse the command-line in order to figure out the
@@ -31,6 +33,8 @@ enum Operation {
     Operation_ReadScan = 6,         /* --readscan <binary-output> */
     Operation_ReadRange = 7,        /* --readrange */
     Operation_Benchmark = 8,        /* --benchmark */
+    Operation_Echo = 9,             /* --echo */
+    Operation_EchoAll = 10,         /* --echo-all */
 };
 
 /**
@@ -38,8 +42,6 @@ enum Operation {
  * be "--interactive", meaning that we'll print to the command-line live as
  * results come in. Only one output format can be specified, except that
  * "--interactive" can be specified alongside any of the other ones.
- * FIXME: eventually we'll support multiple file formats and "all"
- * outputing simultaneously.
  */
 enum OutputFormat {
     Output_Default      = 0x0000,
@@ -56,7 +58,8 @@ enum OutputFormat {
     Output_Unicornscan  = 0x0200,   /* -oU, "unicornscan" */
     Output_None         = 0x0400,
     Output_Certs        = 0x0800,
-    Output_SQLite	= 0x1000,   /* -oQ, "sqlite" */
+    Output_Hostonly     = 0x1000,   /* -oH, "hostonly" */
+    Output_SQLite	= 0x2000,   /* -oQ, "sqlite" */
     Output_All          = 0xFFBF,   /* not supported */
 };
 
@@ -100,10 +103,11 @@ struct Masscan
     
     struct {
         unsigned tcp:1;
-        unsigned udp:1;
+        unsigned udp:1;     /* -sU */
         unsigned sctp:1;
-        unsigned ping:1; /* --ping, ICMP echo */
-        unsigned arp:1; /* --arp, local ARP scan */
+        unsigned ping:1;    /* --ping, ICMP echo */
+        unsigned arp:1;     /* --arp, local ARP scan */
+        unsigned oproto:1;  /* -sO */
     } scan_type;
     
     /**
@@ -122,19 +126,20 @@ struct Masscan
      * One or more network adapters that we'll use for scanning. Each adapter
      * should have a separate set of IP source addresses, except in the case
      * of PF_RING dnaX:Y adapters.
-     * FIXME: add support for link aggregation across adapters
      */
     struct {
         char ifname[256];
         struct Adapter *adapter;
-        struct Source src;
-        unsigned char my_mac[6];
-        unsigned char router_mac[6];
-        unsigned router_ip;
+        struct stack_src_t src;
+        macaddress_t source_mac;
+        macaddress_t router_mac_ipv4;
+        macaddress_t router_mac_ipv6;
+        ipv4address_t router_ip;
         int link_type; /* libpcap definitions */
         unsigned char my_mac_count; /*is there a MAC address? */
         unsigned vlan_id;
         unsigned is_vlan:1;
+        unsigned is_usable:1;
     } nic[8];
     unsigned nic_count;
 
@@ -143,22 +148,8 @@ struct Masscan
      * The user can specify anything here, and we'll resolve all overlaps
      * and such, and sort the target ranges.
      */
-    struct RangeList targets;
-
-    /**
-     * The ports we are scanning for. The user can specify repeated ports
-     * and overlapping ranges, but we'll deduplicate them, scanning ports
-     * only once.
-     * NOTE: TCP ports are stored 0-64k, but UDP ports are stored in the
-     * range 64k-128k, thus, allowing us to scan both at the same time.
-     */
-    struct RangeList ports;
+    struct MassIP targets;
     
-    /**
-     * Only output these types of banners
-     */
-    struct RangeList banner_types;
-
     /**
      * IPv4 addresses/ranges that are to be exluded from the scan. This takes
      * precedence over any 'include' statement. What happens is this: after
@@ -167,8 +158,12 @@ struct Masscan
      * Thus, during the scan, we only choose from the target/whitelist and
      * don't consult the exclude/blacklist.
      */
-    struct RangeList exclude_ip;
-    struct RangeList exclude_port;
+    struct MassIP exclude;
+
+    /**
+     * Only output these types of banners
+     */
+    struct RangeList banner_types;
 
 
     /**
@@ -203,7 +198,9 @@ struct Masscan
     unsigned is_poodle_sslv3:1; /* --vuln poodle, scan for this vuln */
     unsigned is_hello_ssl:1;    /* --ssl, use SSL HELLO on all ports */
     unsigned is_hello_smbv1:1;  /* --smbv1, use SMBv1 hello, instead of v1/v2 hello */
+    unsigned is_hello_http:1;    /* --hello=http, use HTTP on all ports */
     unsigned is_scripting:1;    /* whether scripting is needed */
+    unsigned is_capture_servername:1; /* --capture servername */
         
     /**
      * Wait forever for responses, instead of the default 10 seconds
@@ -373,6 +370,7 @@ struct Masscan
         char *nmap_service_probes_filename;
     
         struct PayloadsUDP *udp;
+        struct PayloadsUDP *oproto;
         struct TcpCfgPayloads *tcp;
         struct NmapServiceProbeList *probes;
     } payloads;
@@ -397,7 +395,7 @@ struct Masscan
     char *bpf_filter;
 
     struct {
-        unsigned ip;
+        ipaddress ip;
         unsigned port;
     } redis;
 
@@ -465,11 +463,24 @@ masscan_set_parameter(struct Masscan *masscan,
 
 
 
+/**
+ * Discover the local network adapter parameters, such as whcih
+ * MAC address we are using and the MAC addresses of the
+ * local routers.
+ */
 int
 masscan_initialize_adapter(
     struct Masscan *masscan,
     unsigned index,
-    unsigned char *adapter_mac,
-    unsigned char *router_mac);
+    macaddress_t *source_mac,
+    macaddress_t *router_mac_ipv4,
+    macaddress_t *router_mac_ipv6);
+
+/**
+ * Echoes the settings to the command-line. By default, echoes only
+ * non-default values. With "echo-all", everything is echoed.
+ */
+void
+masscan_echo(struct Masscan *masscan, FILE *fp, unsigned is_echo_all);
 
 #endif

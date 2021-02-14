@@ -49,7 +49,7 @@
 
 #ifndef UNUSEDPARM
 #ifdef __GNUC__
-#define UNUSEDPARM(x) x=(x)
+#define UNUSEDPARM(x)
 #else
 #define UNUSEDPARM(x) x=(x)
 #endif
@@ -206,6 +206,7 @@ struct PcapFunctions PCAP = {
 static void *my_null(int x, ...)
 {
 	UNUSEDPARM(x);
+    printf("%.*s", 0, "a"); /* Remove warnings about no effects */
     return 0;
 }
 static pcap_t *null_PCAP_OPEN_OFFLINE(const char *fname, char *errbuf)
@@ -243,7 +244,7 @@ static int null_PCAP_SETDIRECTION(pcap_t *p, pcap_direction_t d)
 static const char *null_PCAP_DATALINK_VAL_TO_NAME(int dlt)
 {
 #ifdef STATICPCAP
-    return pcap_datalink_val_toName(dlt);
+    return pcap_datalink_val_to_name(dlt);
 #endif
 	my_null(1, dlt);
     return 0;
@@ -258,6 +259,14 @@ static void null_PCAP_PERROR(pcap_t *p, char *prefix)
 	fprintf(stderr, "%s\n", prefix);
     perror("pcap");
 }
+static const char*null_PCAP_GETERR(pcap_t *p)
+{
+#ifdef STATICPCAP
+    return pcap_geterr(p);
+#endif
+	UNUSEDPARM(p);
+	return "(unknown)";
+}
 static const char *null_PCAP_DEV_NAME(const pcap_if_t *dev)
 {
     return dev->name;
@@ -271,6 +280,10 @@ static const pcap_if_t *null_PCAP_DEV_NEXT(const pcap_if_t *dev)
     return dev->next;
 }
 
+/*
+ * Some Windows-specific functions to improve speed
+ */
+#if defined(WIN32)
 static pcap_send_queue *null_PCAP_SENDQUEUE_ALLOC(size_t size)
 {
 	UNUSEDPARM(size);
@@ -293,6 +306,8 @@ static int null_PCAP_SENDQUEUE_QUEUE(pcap_send_queue *queue,
 	my_null(4, queue, pkt_header, pkt_data);
 	return 0;
 }
+#endif /*WIN32*/
+
 
 /**
  * Runtime-load the libpcap shared-object or the winpcap DLL. We
@@ -365,16 +380,16 @@ if (pl->datalink == NULL) pl->func_err=1, pl->datalink = null_##PCAP_DATALINK;
         for (i=0; possible_names[i]; i++) {
             hLibpcap = dlopen(possible_names[i], RTLD_LAZY);
             if (hLibpcap) {
-                LOG(1, "pcap: found library: %s\n", possible_names[i]);
+                LOG(1, "[+] pcap: found library: %s\n", possible_names[i]);
                 break;
             } else {
-                LOG(2, "pcap: failed to load: %s\n", possible_names[i]);
+                LOG(1, "[-] pcap: failed to load: %s\n", possible_names[i]);
             }
         }
      
         if (hLibpcap == NULL) {
-            fprintf(stderr, "pcap: failed to load libpcap shared library\n");
-            fprintf(stderr, "    HINT: you must install libpcap or WinPcap\n");
+            LOG(0, "[-] FAIL: failed to load libpcap shared library\n");
+            LOG(0, "    [hint]: you must install libpcap or WinPcap\n");
         }
     }
     
@@ -405,15 +420,21 @@ pl->func_err=0, pl->datalink = null_##PCAP_DATALINK;
     DOLINK(PCAP_SETDIRECTION    , setdirection);
     DOLINK(PCAP_DATALINK_VAL_TO_NAME , datalink_val_to_name);
     DOLINK(PCAP_PERROR          , perror);
+    DOLINK(PCAP_GETERR          , geterr);
 
-    DOLINK(PCAP_DEV_NAME        , dev_name);
-    DOLINK(PCAP_DEV_DESCRIPTION , dev_description);
-    DOLINK(PCAP_DEV_NEXT        , dev_next);
 
+    /* pseudo functions that don't exist in the libpcap interface */
+    pl->dev_name = null_PCAP_DEV_NAME;
+    pl->dev_description = null_PCAP_DEV_DESCRIPTION;
+    pl->dev_next = null_PCAP_DEV_NEXT;
+
+    /* windows-only functions that might improve speed */
+#if defined(WIN32)
 	DOLINK(PCAP_SENDQUEUE_ALLOC		, sendqueue_alloc);
 	DOLINK(PCAP_SENDQUEUE_TRANSMIT	, sendqueue_transmit);
 	DOLINK(PCAP_SENDQUEUE_DESTROY	, sendqueue_destroy);
 	DOLINK(PCAP_SENDQUEUE_QUEUE		, sendqueue_queue);
+#endif
 
     DOLINK(PCAP_CREATE              , create);
     DOLINK(PCAP_SET_SNAPLEN         , set_snaplen);

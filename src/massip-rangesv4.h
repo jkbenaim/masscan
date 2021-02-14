@@ -1,6 +1,7 @@
 #ifndef RANGES_H
 #define RANGES_H
 #include <stdint.h>
+#include <stdio.h>
 
 /**
  * A range of either IP addresses or ports
@@ -20,8 +21,6 @@ struct RangeList
     unsigned count;
     unsigned max;
     unsigned *picker;
-    unsigned *picker_hash;
-    unsigned picker_mask;
     unsigned is_sorted:1;
 };
 
@@ -39,25 +38,6 @@ struct RangeList
 void
 rangelist_add_range(struct RangeList *task, unsigned begin, unsigned end);
 
-/**
- * Removes the given range from the target list. The input range doesn't
- * have to exist, or can partial overlap with existing ranges.
- * @param task
- *      A list of ranges of either IPv4 addresses or port numbers.
- * @param begin
- *      The first address of the range that'll be removed.
- * @param end
- *      The last address of the range that'll be removed (inclusive).
- */
-void
-rangelist_remove_range(struct RangeList *task, unsigned begin, unsigned end);
-
-/**
- * Same as 'rangelist_remove_range()', except the input is a range
- * structure instead of a start/stop numbers.
- */
-void
-rangelist_remove_range2(struct RangeList *task, struct Range range);
 
 /**
  * Returns 'true' is the indicated port or IP address is in one of the task
@@ -72,6 +52,14 @@ rangelist_remove_range2(struct RangeList *task, struct Range range);
 int
 rangelist_is_contains(const struct RangeList *task, unsigned number);
 
+
+/**
+ * Returns 'true' if the indicate range is valid, which is simple the
+ * fact that 'begin' comes before 'end'. We mark invalid ranges
+ * by putting 'begin' after the 'end'
+ */
+int
+range_is_valid(struct Range range);
 
 /**
  * Parses IPv4 addresses out of a string. A number of formats are allowed,
@@ -101,12 +89,10 @@ range_parse_ipv4(const char *line, unsigned *inout_offset, unsigned max);
  *      A list, probably read in from --excludefile, of things that we
  *      should not be scanning, that will override anything we otherwise
  *      try to scan.
- * @return
- *      the total number of IP addresses or ports removed.
  */
-uint64_t
+void
 rangelist_exclude(  struct RangeList *targets,
-              const struct RangeList *excludes);
+                    struct RangeList *excludes);
 
 
 /**
@@ -196,6 +182,12 @@ rangelist_merge(struct RangeList *list1, const struct RangeList *list2);
 void
 rangelist_optimize(struct RangeList *targets);
 
+
+/**
+ * Sorts the list of target. We maintain the list of targets in sorted
+ * order internally even though we scan the targets in random order
+ * externally.
+ */
 void
 rangelist_sort(struct RangeList *targets);
 

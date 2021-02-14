@@ -5,10 +5,10 @@
 */
 #ifndef RANGES6_H
 #define RANGES6_H
+#include "massip-addr.h"
 #include <stdio.h>
 #include <stdint.h>
-
-typedef struct {uint64_t hi; uint64_t lo;} ipv6address;
+struct Range;
 
 /**
  * A range of IPv6 ranges.
@@ -28,7 +28,8 @@ struct Range6List
     struct Range6 *list;
     size_t count;
     size_t max;
-    uint64_t *picker;
+    size_t *picker;
+    unsigned is_sorted:1;
 };
 
 /**
@@ -43,7 +44,8 @@ struct Range6List
  *      The last address (inclusive) of the range that'll be added.
  */
 void
-range6list_add_range(struct Range6List *targets, const ipv6address begin, const ipv6address end);
+range6list_add_range(struct Range6List *targets, ipv6address begin, ipv6address end);
+
 
 /**
  * Removes the given range from the target list. The input range doesn't
@@ -80,21 +82,10 @@ range6list_is_contains(const struct Range6List *targets, const ipv6address ip);
 
 
 /**
- * Parses IPv6 addresses out of a string. A number of formats are allowed,
- * either an individual IPv6 address, a CIDR spec, or a start/stop address.
- * @param line
- *      A line of text, probably read from a configuration file, or a string
- *      probably input from the command line. It doesn't need to be nul
- *      terminated.
- * @param inout_offset
- *      The offset into the line were we are parsing. This integer will be
- *      be incremented by the number of bytes we've parsed from the string.
- * @param max
- *      The length of the line, in other words, the max value of inout_offset.
+ * Tests if the range is bad/invalid.
+ * @return 1 is invalid, 0 if good.
  */
-struct Range6 
-range6_parse(const char *line, unsigned *inout_offset, unsigned max);
-
+int range6_is_bad_address(const struct Range6 *range);
 
 /**
  * Remove things from the target list. The primary use of this is the
@@ -110,7 +101,7 @@ range6_parse(const char *line, unsigned *inout_offset, unsigned max);
  * @return
  *      the total number of IP addresses or ports removed.
  */
-uint64_t
+ipv6address
 range6list_exclude( struct Range6List *targets,
                     const struct Range6List *excludes);
 
@@ -124,7 +115,7 @@ range6list_exclude( struct Range6List *targets,
  * @return
  *      The total number of address or ports.
  */
-uint64_t
+massint128_t
 range6list_count(const struct Range6List *targets);
 
 /**
@@ -176,6 +167,14 @@ range6list_merge(struct Range6List *list1, const struct Range6List *list2);
  */
 void
 range6list_optimize(struct Range6List *targets);
+
+/**
+ * Sorts the list of target. We maintain the list of targets in sorted
+ * order internally even though we scan the targets in random order
+ * externally.
+ */
+void
+range6list_sort(struct Range6List *targets);
 
 /**
  * Does a regression test of this module
