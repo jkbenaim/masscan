@@ -541,8 +541,9 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 		uint8_t *pxbuf = NULL;
 		size_t pxbuf_len = 0;
 
-		//pxbuf_len = length;
-		pxbuf_len = 0;
+		// set pxbuf_len to 0 here to elide all X509/zeroaccess px's
+		pxbuf_len = length;
+		//pxbuf_len = 0;
 		pxbuf = malloc(pxbuf_len);
 		if (!pxbuf) {
 			zErr = "allocating pxbuf";
