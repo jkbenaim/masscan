@@ -22,28 +22,27 @@ struct db_stmt_s {
 	{
 		.id = STMT_INIT,
 		.sqltext =
-		R"STATEMENT(
-PRAGMA journal_mode=WAL;
-CREATE TABLE IF NOT EXISTS sense (
-	sense_id INTEGER PRIMARY KEY,
-	scan_id,
-	time,
-	ip,
-	ip_proto,
-	port,
-	ttl,
-	proto,
-	px
-);
-CREATE TABLE IF NOT EXISTS scans(
-	scan_id INTEGER PRIMARY KEY,
-	version,
-	station,
-	start,
-	end,
-	filename
-);
-		)STATEMENT",
+			"PRAGMA journal_mode=WAL;\n"
+			"CREATE TABLE IF NOT EXISTS sense (\n"
+			"	sense_id INTEGER PRIMARY KEY,\n"
+			"	scan_id,\n"
+			"	time,\n"
+			"	zone,\n"
+			"	ip,\n"
+			"	ip_proto,\n"
+			"	port,\n"
+			"	ttl,\n"
+			"	proto,\n"
+			"	px\n"
+			");\n"
+			"CREATE TABLE IF NOT EXISTS scans(\n"
+			"	scan_id INTEGER PRIMARY KEY,\n"
+			"	version,\n"
+			"	station,\n"
+			"	start,\n"
+			"	end,\n"
+			"	filename\n"
+			");\n"
 	},
 	{
 		.id = STMT_NEW_SCAN,
@@ -51,27 +50,28 @@ CREATE TABLE IF NOT EXISTS scans(
 	},
 	{
 		.id = STMT_ADD_SENSE,
-		.sqltext = R"STATEMENT(
-			INSERT INTO sense(
-				scan_id,
-				time,
-				ip,
-				ip_proto,
-				port,
-				ttl,
-				proto,
-				px)
-			VALUES(
-				:scan_id,
-				:time,
-				:ip,
-				:ip_proto,
-				:port,
-				:ttl,
-				:proto,
-				:px
-			);
-		)STATEMENT",
+		.sqltext =
+			"INSERT INTO sense(\n"
+			"	scan_id,\n"
+			"	time,\n"
+			"	zone,\n"
+			"	ip,\n"
+			"	ip_proto,\n"
+			"	port,\n"
+			"	ttl,\n"
+			"	proto,\n"
+			"	px)\n"
+			"VALUES(\n"
+			"	:scan_id,\n"
+			"	:time,\n"
+			"	0,\n"
+			"	:ip,\n"
+			"	:ip_proto,\n"
+			"	:port,\n"
+			"	:ttl,\n"
+			"	:proto,\n"
+			"	:px\n"
+			");\n"
 	},
 	{
 		.id = STMT_SET_SCAN_TIMES,
