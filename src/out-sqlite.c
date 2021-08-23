@@ -12,6 +12,7 @@ enum STMT_ID_e {
 	STMT_NEW_SCAN,
 	STMT_ADD_SENSE,
 	STMT_SET_SCAN_TIMES,
+	STMT_ADD_PROTO,
 };
 
 struct db_stmt_s {
@@ -42,6 +43,10 @@ struct db_stmt_s {
 			"	start,\n"
 			"	end,\n"
 			"	filename\n"
+			");\n"
+			"CREATE TABLE IF NOT EXISTS protos(\n"
+			"	id INTEGER PRIMARY KEY,\n"
+			"	name\n"
 			");\n"
 	},
 	{
@@ -76,6 +81,10 @@ struct db_stmt_s {
 	{
 		.id = STMT_SET_SCAN_TIMES,
 		.sqltext = "UPDATE scans SET start=:start, end=:end WHERE scan_id=:scan_id;",
+	},
+	{
+		.id = STMT_ADD_PROTO,
+		.sqltext = "INSERT INTO protos(id, name) VALUES (:id, :name) ON CONFLICT DO NOTHING;",
 	},
 	{
 		// sentinel
@@ -186,6 +195,46 @@ sqlite_out_open(struct Output *out, FILE *fp)
 	rc = sqlite3_clear_bindings(s->stmt);
 	// fun fact, the return value of sqlite3_clear_bindings is not
 	// defined in the sqlite documentation.
+	
+	// add all protos to protos table.
+	s = &stmts[STMT_ADD_PROTO];
+	for (enum ApplicationProtocol e = 0; e < PROTO_end_of_list; e++) {
+		rc = sqlite3_bind_int(
+			s->stmt,
+			1,
+			e
+		);
+		if (rc != SQLITE_OK) {
+			zErr = "in bind proto id";
+			goto out_return;
+		}
+
+		rc = sqlite3_bind_text(
+			s->stmt,
+			2,
+			masscan_app_to_string(e),
+			-1,
+			SQLITE_STATIC
+		);
+		if (rc != SQLITE_OK) {
+			zErr = "in bind proto name";
+			goto out_return;
+		}
+
+		// step it
+		rc = sqlite3_step(s->stmt);
+		if (rc != SQLITE_DONE) {
+			zErr = "in step add proto";
+			goto out_return;
+		}
+
+		// reset
+		rc = sqlite3_reset(s->stmt);
+		if (rc != SQLITE_OK) {
+			zErr = "in reset add proto";
+			goto out_return;
+		}
+	}
 	
 
 	// begin a transaction
@@ -386,6 +435,7 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 		goto out_return;
 	}
 
+	/*
 	char reason_buffer[128];
 	reason_string(reason, reason_buffer, sizeof(reason_buffer));
 
@@ -395,6 +445,11 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 		reason_buffer,
 		-1,
 		SQLITE_STATIC
+	);*/
+	rc = sqlite3_bind_int(
+		s->stmt,
+		7,
+		0	/* proto "tcp" */
 	);
 	if (rc != SQLITE_OK) {
 		zErr = "in bind proto";
@@ -444,7 +499,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
         enum ApplicationProtocol proto, unsigned ttl,
         const unsigned char *px, unsigned length)
 {
-	__label__ out_return;
+	__label__ out_return, out_reset;
 	int rc;
 	char *zErr = NULL;
 
@@ -528,12 +583,18 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 		goto out_return;
 	}
 
+	/*
 	rc = sqlite3_bind_text(
 		s->stmt,
 		7,
 		masscan_app_to_string(proto),
 		-1,
 		SQLITE_STATIC
+	);*/
+	rc = sqlite3_bind_int(
+		s->stmt,
+		7,
+		proto
 	);
 	if (rc != SQLITE_OK) {
 		zErr = "in bind proto";
@@ -547,6 +608,10 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 	switch(proto) {
 	case PROTO_X509_CERT:
 	case PROTO_UDP_ZEROACCESS:
+		// HACK BUG FIXME ETC
+		// BIG WARNING HERE
+		// we don't need x509/zeroaccess shit, so let's skip this.
+		goto out_reset;
 	{
 		uint8_t *pxbuf = NULL;
 		size_t pxbuf_len = 0;
@@ -608,6 +673,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 		goto out_return;
 	}
 
+out_reset:
 	// reset and clear binds
 	rc = sqlite3_reset(s->stmt);
 	if (rc != SQLITE_OK) {
