@@ -646,7 +646,7 @@ _binaryfile_parse(struct Output *out, const char *filename,
                 //goto end;
                 break;
             default:
-                fprintf(stderr, "file corrupt: unknown type %u\n", type);
+                fprintf(stderr, "%s: file corrupt: unknown type %u\n", filename, type);
                 goto end;
         }
         total_records++;
