@@ -400,6 +400,23 @@ sqlite_out_close(struct Output *out, FILE *fp)
 		goto out_return;
 	}
 
+	// finalize all statements
+	for (enum STMT_ID_e i = 0; stmts[i].sqltext; i++) {
+		rc = sqlite3_finalize(stmts[i].stmt);
+		if (rc != SQLITE_OK) {
+			fprintf(stderr, "%s\n", sqlite3_errmsg(out->sqlite.db));
+			zErr = "in finalize";
+			goto out_return;
+		}
+	}
+
+	// close db
+	rc = sqlite3_close(out->sqlite.db);
+	if (rc != SQLITE_OK) {
+		zErr = "closing db";
+		goto out_return;
+	}
+
 out_return:
 	if (zErr) {
 		fprintf(stderr, "%s: error: %s\n",
