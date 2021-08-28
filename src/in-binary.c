@@ -696,6 +696,7 @@ read_binary_scanfile(struct Masscan *masscan,
      * Then arg_first=3 and arg_max=5.
      */
     for (i=arg_first; i<arg_max; i++) {
+        out->infilename = argv[i];
         _binaryfile_parse(out, argv[i], &masscan->targets, &masscan->banner_types);
     }
 
