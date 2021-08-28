@@ -22,7 +22,7 @@ ifneq (, $(findstring linux, $(SYS)))
 ifneq (, $(findstring musl, $(SYS)))
 LIBS = 
 else
-LIBS = -lm -lrt -ldl -lpthread
+LIBS = -lm -lrt -ldl -lpthread -lzstd
 endif
 INCLUDES =
 FLAGS2 = 

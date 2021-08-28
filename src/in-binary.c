@@ -16,6 +16,7 @@
 
 #include <stdlib.h>
 #include <assert.h>
+#include <zstd.h>
 
 static const size_t BUF_MAX = 1024*1024;
 
@@ -470,10 +471,12 @@ _binaryfile_parse(struct Output *out, const char *filename,
            const struct RangeList *btypes)
 {
     FILE *fp = 0;
-    unsigned char *buf = 0;
+    unsigned char *buf = 0, *compressedBuf = 0, *decompressedBuf = 0;
     size_t bytes_read;
     uint64_t total_records = 0;
     int x;
+    size_t decompressedSize = 0ULL - 3;
+	size_t compressedSize = 0;
 
     /* Allocate a buffer of up to one megabyte per record */
     buf = MALLOC(BUF_MAX);
@@ -484,6 +487,32 @@ _binaryfile_parse(struct Output *out, const char *filename,
         perror(filename);
         goto end;
     }
+
+    /* check if this is a zstd-packed file */
+    bytes_read = fread(buf, 18, 1, fp);
+	if (bytes_read != 1) {
+			perror(filename);
+			goto end;
+	}
+    decompressedSize = ZSTD_getFrameContentSize(buf, 18);
+	if ( (decompressedSize != ZSTD_CONTENTSIZE_UNKNOWN) &&
+		 (decompressedSize != ZSTD_CONTENTSIZE_ERROR) ) {
+			fseek(fp, 0L, SEEK_END);
+			compressedSize = ftell(fp);
+			compressedBuf = malloc(compressedSize);
+			decompressedBuf = malloc(decompressedSize);
+			rewind(fp);
+			bytes_read = fread(compressedBuf, compressedSize, 1, fp);
+			size_t s = ZSTD_decompress(decompressedBuf, decompressedSize, compressedBuf, compressedSize);
+			if (ZSTD_isError(s)) {
+					printf("zstd error: %s\n", ZSTD_getErrorName(s));
+					exit(1);
+			}
+			fclose(fp);
+			free(compressedBuf);
+			fp = fmemopen(decompressedBuf, decompressedSize, "r");
+	}
+	rewind(fp);
 
     /* first record is pseudo-record */
     bytes_read = fread(buf, 1, 'a'+2, fp);
