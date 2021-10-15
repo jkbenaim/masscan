@@ -21,7 +21,7 @@
 #include "rand-blackrock.h"     /* the BlackRock shuffling func */
 #include "rand-lcg.h"           /* the LCG randomization func */
 #include "templ-pkt.h"          /* packet template, that we use to send */
-#include "rawsock.h"            /* api on top of Linux, Windows, Mac OS X*/
+#include "rawsock.h"            /* API on top of Linux, Windows, Mac OS X*/
 #include "logger.h"             /* adjust with -v command-line opt */
 #include "main-status.h"        /* printf() regular status updates */
 #include "main-throttle.h"      /* rate limit */
@@ -37,7 +37,7 @@
 #include "proto-icmp.h"         /* handle ICMP responses */
 #include "proto-udp.h"          /* handle UDP responses */
 #include "syn-cookie.h"         /* for SYN-cookies on send */
-#include "output.h"             /* for outputing results */
+#include "output.h"             /* for outputting results */
 #include "rte-ring.h"           /* producer/consumer ring buffer */
 #include "rawsock-pcapfile.h"   /* for saving pcap files w/ raw packets */
 #include "stub-pcap.h"          /* dynamically load libpcap library */
@@ -273,7 +273,7 @@ infinite:
     end = range;
     if (masscan->resume.count && end > start + masscan->resume.count)
         end = start + masscan->resume.count;
-    end += retries * rate;
+    end += retries * range;
 
 
     /* -----------------
@@ -433,7 +433,7 @@ infinite:
          * <ctrl-c> to exit early */
         parms->my_index = i;
 
-        /* If the user pressed <ctrl-c>, then we need to exit. but, in case
+        /* If the user pressed <ctrl-c>, then we need to exit. In case
          * the user wants to --resume the scan later, we save the current
          * state in a file */
         if (is_tx_done) {
@@ -454,7 +454,7 @@ infinite:
     /*
      * Flush any untransmitted packets. High-speed mechanisms like Windows
      * "sendq" and Linux's "PF_RING" queue packets and transmit many together,
-     * so there may be some packets that we've queueud but not yet transmitted.
+     * so there may be some packets that we've queued but not yet transmitted.
      * This call makes sure they are transmitted.
      */
     rawsock_flush(adapter);
@@ -517,7 +517,7 @@ is_nic_port(const struct Masscan *masscan, unsigned ip)
 static unsigned
 is_ipv6_multicast(ipaddress ip_me)
 {
-    /* If this is an IPv6 multicast packe, one sent to the IPv6
+    /* If this is an IPv6 multicast packet, one sent to the IPv6
      * address with a prefix of FF02::/16 */
     return ip_me.version == 6 && (ip_me.ipv6.hi>>48ULL) == 0xFF02;
 }
@@ -606,6 +606,7 @@ receive_thread(void *v)
      */
     if (masscan->is_banners) {
         struct TcpCfgPayloads *pay;
+        size_t i;
 
         /*
          * Create TCP connection table
@@ -635,41 +636,51 @@ receive_thread(void *v)
                 masscan->is_capture_html,
                 masscan->is_capture_heartbleed,
 				masscan->is_capture_ticketbleed);
-        if (masscan->http_user_agent_length)
+        if (masscan->is_hello_smbv1)
+            tcpcon_set_parameter(tcpcon, "hello", 1, "smbv1");
+        if (masscan->is_hello_http)
+            tcpcon_set_parameter(tcpcon, "hello", 1, "http");
+        if (masscan->is_hello_ssl)
+            tcpcon_set_parameter(tcpcon, "hello", 1, "ssl");
+        if (masscan->is_heartbleed)
+            tcpcon_set_parameter(tcpcon, "heartbleed", 1, "1");
+        if (masscan->is_ticketbleed)
+            tcpcon_set_parameter(tcpcon, "ticketbleed", 1, "1");
+        if (masscan->is_poodle_sslv3)
+            tcpcon_set_parameter(tcpcon, "sslv3", 1, "1");
+
+        if (masscan->http.payload)
+            tcpcon_set_parameter(   tcpcon,
+                                    "http-payload",
+                                    masscan->http.payload_length,
+                                    masscan->http.payload);
+        if (masscan->http.user_agent)
             tcpcon_set_parameter(   tcpcon,
                                     "http-user-agent",
-                                    masscan->http_user_agent_length,
-                                    masscan->http_user_agent);
-        if (masscan->is_hello_smbv1)
+                                    masscan->http.user_agent_length,
+                                    masscan->http.user_agent);
+        if (masscan->http.host)
             tcpcon_set_parameter(   tcpcon,
-                                 "hello",
-                                 1,
-                                 "smbv1");
-        if (masscan->is_hello_http)
+                                    "http-host",
+                                    masscan->http.host_length,
+                                    masscan->http.host);
+        if (masscan->http.method)
             tcpcon_set_parameter(   tcpcon,
-                                 "hello",
-                                 1,
-                                 "http");
-        if (masscan->is_hello_ssl)
+                                    "http-method",
+                                    masscan->http.method_length,
+                                    masscan->http.method);
+        if (masscan->http.url)
             tcpcon_set_parameter(   tcpcon,
-                                 "hello",
-                                 1,
-                                 "ssl");
-        if (masscan->is_heartbleed)
+                                    "http-url",
+                                    masscan->http.url_length,
+                                    masscan->http.url);
+        if (masscan->http.version)
             tcpcon_set_parameter(   tcpcon,
-                                 "heartbleed",
-                                 1,
-                                 "1");
-        if (masscan->is_ticketbleed)
-            tcpcon_set_parameter(   tcpcon,
-                                 "ticketbleed",
-                                 1,
-                                 "1");
-        if (masscan->is_poodle_sslv3)
-            tcpcon_set_parameter(   tcpcon,
-                                 "sslv3",
-                                 1,
-                                 "1");
+                                    "http-version",
+                                    masscan->http.version_length,
+                                    masscan->http.version);
+
+
         if (masscan->tcp_connection_timeout) {
             char foo[64];
             sprintf_s(foo, sizeof(foo), "%u", masscan->tcp_connection_timeout);
@@ -680,13 +691,35 @@ receive_thread(void *v)
         }
         if (masscan->tcp_hello_timeout) {
             char foo[64];
-            sprintf_s(foo, sizeof(foo), "%u", masscan->tcp_connection_timeout);
+            sprintf_s(foo, sizeof(foo), "%u", masscan->tcp_hello_timeout);
             tcpcon_set_parameter(   tcpcon,
                                  "hello-timeout",
                                  strlen(foo),
                                  foo);
         }
         
+        for (i=0; i<masscan->http.headers_count; i++) {
+            tcpcon_set_http_header(tcpcon,
+                        masscan->http.headers[i].name,
+                        masscan->http.headers[i].value_length,
+                        masscan->http.headers[i].value,
+                        http_field_replace);
+        }
+        for (i=0; i<masscan->http.cookies_count; i++) {
+            tcpcon_set_http_header(tcpcon,
+                        "Cookie",
+                        masscan->http.cookies[i].value_length,
+                        masscan->http.cookies[i].value,
+                        http_field_add);
+        }
+        for (i=0; i<masscan->http.remove_count; i++) {
+            tcpcon_set_http_header(tcpcon,
+                        masscan->http.headers[i].name,
+                        0,
+                        0,
+                        http_field_remove);
+        }
+
         for (pay = masscan->payloads.tcp; pay; pay = pay->next) {
             char name[64];
             sprintf_s(name, sizeof(name), "hello-string[%u]", pay->port);
@@ -821,7 +854,7 @@ receive_thread(void *v)
                      * get no responses. */
                     stack_ndpv6_incoming_request(stack, &parsed, px, length);
                     continue;
-                case 136: /* Neighbor Advertisment */
+                case 136: /* Neighbor Advertisement */
                     /* TODO: If doing an --ndpscan, the scanner subsystem needs to deal
                      * with these */
                     continue;
@@ -1178,7 +1211,8 @@ main_scan(struct Masscan *masscan)
         LOG(0, " [hint] try something like \"--ports 0-65535\"\n");
         return 1;
     }
-    range = count_ips * count_ports + (uint64_t)(masscan->retries * masscan->max_rate);
+    range = count_ips * count_ports;
+    range += (uint64_t)(masscan->retries * range);
 
     /*
      * If doing an ARP scan, then don't allow port scanning
@@ -1196,7 +1230,7 @@ main_scan(struct Masscan *masscan)
      */
     if (count_ips > 1000000000ULL && rangelist_count(&masscan->exclude.ipv4) == 0) {
         LOG(0, "FAIL: range too big, need confirmation\n");
-        LOG(0, " [hint] to prevent acccidents, at least one --exclude must be specified\n");
+        LOG(0, " [hint] to prevent accidents, at least one --exclude must be specified\n");
         LOG(0, " [hint] use \"--exclude 255.255.255.255\" as a simple confirmation\n");
         exit(1);
     }
@@ -1395,7 +1429,7 @@ main_scan(struct Masscan *masscan)
         if (masscan->output.is_status_updates)
             status_print(&status, min_index, range, rate,
                 total_tcbs, total_synacks, total_syns,
-                0);
+                0, masscan->output.is_status_ndjson);
 
         /* Sleep for almost a second */
         pixie_mssleep(750);
@@ -1452,10 +1486,16 @@ main_scan(struct Masscan *masscan)
             is_rx_done = 1;
         }
 
+        if (time(0) - now - 10 > masscan->wait) {
+            LOG(0, "[-] Passed the wait window but still running, forcing exit...\n");
+            exit(0);
+        }
+
         if (masscan->output.is_status_updates) {
             status_print(&status, min_index, range, rate,
                 total_tcbs, total_synacks, total_syns,
-                masscan->wait - (time(0) - now));
+                masscan->wait - (time(0) - now),
+                masscan->output.is_status_ndjson);
 
             for (i=0; i<masscan->nic_count; i++) {
                 struct ThreadPair *parms = &parms_array[i];
@@ -1477,7 +1517,7 @@ main_scan(struct Masscan *masscan)
         } else {
             /* [AFL-fuzz]
              * Join the threads, which doesn't allow us to print out 
-             * status messages, but allows us to exit cleaningly without
+             * status messages, but allows us to exit cleanly without
              * any waiting */
             for (i=0; i<masscan->nic_count; i++) {
                 struct ThreadPair *parms = &parms_array[i];
@@ -1503,7 +1543,7 @@ main_scan(struct Masscan *masscan)
     if (!masscan->output.is_status_updates) {
         uint64_t usec_now = pixie_gettime();
 
-        printf("%u milliseconds ellapsed\n", (unsigned)((usec_now - usec_start)/1000));
+        printf("%u milliseconds elapsed\n", (unsigned)((usec_now - usec_start)/1000));
     }
     
     LOG(1, "[+] all threads have exited                    \n");

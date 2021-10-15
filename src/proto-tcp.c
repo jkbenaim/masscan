@@ -217,6 +217,27 @@ parseInt(const void *vstr, size_t length)
 
 /***************************************************************************
  * Called at startup, when processing command-line options, to set
+ * an HTTP field.
+ ***************************************************************************/
+void
+tcpcon_set_http_header(struct TCP_ConnectionTable *tcpcon,
+                        const char *name,
+                        size_t value_length,
+                        const void *value,
+                        enum http_field_t what)
+{
+    UNUSEDPARM(tcpcon);
+    banner_http.hello_length = http_change_field(
+                            (unsigned char**)&banner_http.hello,
+                            banner_http.hello_length,
+                            name,
+                            (const unsigned char *)value,
+                            value_length,
+                            what);
+}
+
+/***************************************************************************
+ * Called at startup, when processing command-line options, to set
  * parameters specific to TCP processing.
  ***************************************************************************/
 void
@@ -227,6 +248,27 @@ tcpcon_set_parameter(struct TCP_ConnectionTable *tcpcon,
 {
     struct Banner1 *banner1 = tcpcon->banner1;
 
+    if (name_equals(name, "http-payload")) {
+        char lenstr[64];
+        sprintf_s(lenstr, sizeof(lenstr), "%u", (unsigned)value_length);
+
+        banner_http.hello_length = http_change_requestline(
+                                (unsigned char**)&banner_http.hello,
+                                banner_http.hello_length,
+                                (const unsigned char *)value,
+                                value_length,
+                                3); /* payload*/
+
+        banner_http.hello_length = http_change_field(
+                                (unsigned char**)&banner_http.hello,
+                                banner_http.hello_length,
+                                "Content-Length:",
+                                (const unsigned char *)lenstr,
+                                strlen(lenstr),
+                                http_field_replace);
+        return;
+    }
+
     /*
      * You can reset your user-agent here. Whenever I do a scan, I always
      * reset my user-agent. That's now you know it's not me scanning
@@ -236,10 +278,52 @@ tcpcon_set_parameter(struct TCP_ConnectionTable *tcpcon,
     if (name_equals(name, "http-user-agent")) {
         banner_http.hello_length = http_change_field(
                                 (unsigned char**)&banner_http.hello,
-                                (unsigned)banner_http.hello_length,
+                                banner_http.hello_length,
                                 "User-Agent:",
                                 (const unsigned char *)value,
-                                (unsigned)value_length);
+                                value_length,
+                                http_field_replace);
+        return;
+    }
+    if (name_equals(name, "http-host")) {
+        banner_http.hello_length = http_change_field(
+                                (unsigned char**)&banner_http.hello,
+                                banner_http.hello_length,
+                                "Host:",
+                                (const unsigned char *)value,
+                                value_length,
+                                http_field_replace);
+        return;
+    }
+
+    /**
+     * Changes the URL
+     */
+    if (name_equals(name, "http-method")) {
+        banner_http.hello_length = http_change_requestline(
+                                (unsigned char**)&banner_http.hello,
+                                banner_http.hello_length,
+                                (const unsigned char *)value,
+                                value_length,
+                                0); /* method*/
+        return;
+    }
+    if (name_equals(name, "http-url")) {
+        banner_http.hello_length = http_change_requestline(
+                                (unsigned char**)&banner_http.hello,
+                                banner_http.hello_length,
+                                (const unsigned char *)value,
+                                value_length,
+                                1); /* url */
+        return;
+    }
+    if (name_equals(name, "http-version")) {
+        banner_http.hello_length = http_change_requestline(
+                                (unsigned char**)&banner_http.hello,
+                                banner_http.hello_length,
+                                (const unsigned char *)value,
+                                value_length,
+                                2); /* version */
         return;
     }
 
@@ -361,7 +445,7 @@ tcpcon_set_parameter(struct TCP_ConnectionTable *tcpcon,
 
 
         if (p == NULL) {
-            LOG(0, "tcpcon: parmeter: expected array []: %s\n", name);
+            LOG(0, "tcpcon: parameter: expected array []: %s\n", name);
             exit(1);
         }
         port = (unsigned)strtoul(p+1, 0, 0);
@@ -546,7 +630,7 @@ enum DestroyReason {
 };
 
 /***************************************************************************
- * Flush all the banners asssociated with this TCP connection. This always
+ * Flush all the banners associated with this TCP connection. This always
  * called when TCB is destroyed. This may also be called earlier, such
  * as when a FIN is received.
  ***************************************************************************/
@@ -853,7 +937,7 @@ tcpcon_send_packet(
      * four types of packets:
      * 1. a SYN-ACK packet with no payload
      * 2. an ACK packet with no payload
-     * 3. a RST packet with no pacyload
+     * 3. a RST packet with no payload
      * 4. a PSH-ACK packet WITH PAYLOAD
      */
     response->length = tcp_create_packet(
@@ -930,8 +1014,8 @@ tcp_send_RST(
 
     /* Put this buffer on the transmit queue. Remember: transmits happen
      * from a transmit-thread only, and this function is being called
-     * from a receive-thread. Therefore, instead of transmiting ourselves,
-     * we hae to queue it up for later transmission. */
+     * from a receive-thread. Therefore, instead of transmitting ourselves,
+     * we have to queue it up for later transmission. */
     stack_transmit_packetbuffer(stack, response);
 }
 
@@ -1000,7 +1084,7 @@ LOGSEND(struct TCP_Control_Block *tcb, const char *what)
 /***************************************************************************
  * Sends a fake FIN when we've already closed our connection, on the
  * assumption this will help the other side close their side more
- * gracefully. Maybe we shoulid do a RST instead.
+ * gracefully. Maybe we should do a RST instead.
  ***************************************************************************/
 void
 tcpcon_send_FIN(
@@ -1109,7 +1193,7 @@ handle_ack(
     }
 
     /* Make sure this isn't invalid ACK from the future
-     * WRAPPING of 32-bit arithmatic happens here */
+     * WRAPPING of 32-bit arithmetic happens here */
     if (tcb->seqno_me - ackno > 10000) {
         ipaddress_formatted_t fmt = ipaddress_fmt(tcb->ip_them);
         LOG(4, "%s - "
@@ -1408,8 +1492,8 @@ stack_incoming_tcp(struct TCP_ConnectionTable *tcpcon,
                         tcb->tcpstate = STATE_LAST_ACK;
                     } else if (tcb->tcpstate == STATE_ESTABLISHED_RECV) {
                         /* Do nothing, the same thing as if we received data
-                         * during the SENd state. The other side will send it
-                         * again after it has acknolwedged our data */
+                         * during the SEND state. The other side will send it
+                         * again after it has acknowledged our data */
                         ;
                     }
                     break;
@@ -1487,7 +1571,7 @@ stack_incoming_tcp(struct TCP_ConnectionTable *tcpcon,
                         
                         /* Now that we've resent the packet, register another
                          * timeout in order to resend it yet again if not
-                         * acknolwedgeld. */
+                         * acknowledged. */
                         LOGSEND(tcb, "+timeout");
                         timeouts_add(tcpcon->timeouts,
                                      tcb->timeout,

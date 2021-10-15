@@ -36,7 +36,7 @@ _append_ipv6(stream_t *out, const unsigned char *ipv6)
     size_t i;
     int is_ellision = 0;
 
-    /* An IPv6 address is pritned as a series of 2-byte hex words
+    /* An IPv6 address is printed as a series of 2-byte hex words
      * separated by colons :, for a total of 16-bytes */
     for (i = 0; i < 16; i += 2) {
         unsigned n = ipv6[i] << 8 | ipv6[i + 1];
@@ -45,20 +45,22 @@ _append_ipv6(stream_t *out, const unsigned char *ipv6)
          * of 0 can be removed completely, replaced by an extra colon */
         if (n == 0 && !is_ellision) {
             is_ellision = 1;
-            while (i < 16 && ipv6[i + 2] == 0 && ipv6[i + 3] == 0)
+            while (i < 13 && ipv6[i + 2] == 0 && ipv6[i + 3] == 0)
                 i += 2;
             _append_char(out, ':');
 
             /* test for all-zero address, in which case the output
              * will be "::". */
-            if (i == 14)
+            while (i == 14 && ipv6[i] == 0 && ipv6[i + 1] == 0){
+                i=16;
                 _append_char(out, ':');
+            }
             continue;
         }
 
         /* Print the colon between numbers. Fence-post alert: only colons
          * between numbers are printed, not at the beginning or end of the
-         * stirng */
+         * string */
         if (i)
             _append_char(out, ':');
 
@@ -83,7 +85,7 @@ struct ipaddress_formatted ipv6address_fmt(ipv6address a)
     /*
      * Convert address into a sequence of bytes. Our code
      * here represents an IPv6 address as two 64-bit numbers, but
-     * the formatting code above that we copied from a diffent
+     * the formatting code above that we copied from a different
      * project represents it as an array of bytes.
      */
     for (i=0; i<16; i++) {
@@ -237,11 +239,13 @@ int ipv6address_selftest(void)
 {
     int x = 0;
     ipaddress ip;
+    struct ipaddress_formatted fmt;
 
     ip.version = 4;
     ip.ipv4 = 0x01FF00A3;
 
-    if (strcmp(ipaddress_fmt(ip).string, "1.255.0.163") != 0)
+    fmt = ipaddress_fmt(ip);
+    if (strcmp(fmt.string, "1.255.0.163") != 0)
         x++;
 
     return x;

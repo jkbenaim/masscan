@@ -53,7 +53,7 @@ While Linux is the primary target platform, the code runs well on many other
 systems (Windows, macOS, etc.). Here's some additional build info:
 
   * Windows w/ Visual Studio: use the VS10 project
-  * Windows w/ MingGW: just type `make`
+  * Windows w/ MinGW: just type `make`
   * Windows w/ cygwin: won't work
   * Mac OS X /w XCode: use the XCode4 project
   * Mac OS X /w cmdline: just type `make`
@@ -590,7 +590,7 @@ This second benchmark shows roughly how fast the program would run if it were
 using PF_RING, which has near zero overhead.
 
 By the way, the randomization algorithm makes heavy use of "integer arithmetic",
-a chromically slow operation on CPUs. Modern CPUs have doubled the speed
+a chronically slow operation on CPUs. Modern CPUs have doubled the speed
 at which they perform this calculation, making `masscan` much faster.
 
 

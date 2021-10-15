@@ -4,6 +4,7 @@
 #include "string_s.h"
 #include "stack-src.h"
 #include "massip.h"
+#include "util-bool.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -96,7 +97,7 @@ struct TcpCfgPayloads
 struct Masscan
 {
     /**
-     * What this progrma is doing, which is normally "Operation_Scan", but
+     * What this program is doing, which is normally "Operation_Scan", but
      * which can be other things, like "Operation_SelfTest"
      */
     enum Operation op;
@@ -151,7 +152,7 @@ struct Masscan
     struct MassIP targets;
     
     /**
-     * IPv4 addresses/ranges that are to be exluded from the scan. This takes
+     * IPv4 addresses/ranges that are to be excluded from the scan. This takes
      * precedence over any 'include' statement. What happens is this: after
      * all the configuration has been read, we then apply the exclude/blacklist
      * on top of the target/whitelist, leaving only a target/whitelist left.
@@ -228,7 +229,7 @@ struct Masscan
 
     /**
      * --shard n/m
-     * This is used for distributin a scan acros multiple "shards". Every
+     * This is used for distributing a scan across multiple "shards". Every
      * shard in the scan must know the total number of shards, and must also
      * know which of those shards is it's identity. Thus, shard 1/5 scans
      * a different range than 2/5. These numbers start at 1, so it's
@@ -286,6 +287,17 @@ struct Masscan
         unsigned is_append:1;
         
         /**
+         * --json-status
+         * Print each status update line to stderr as JSON ending with a newline
+         *
+         * This only applies to the three types of status lines that are printed
+         * in status_print(); it does *not* apply to things like startup messages,
+         * error messages or discovery of individual ports
+         *
+         */
+        bool is_status_ndjson;
+
+        /**
          * --open
          * --open-only
          * --show open
@@ -332,7 +344,7 @@ struct Masscan
             
             /**
              * When doing "--rotate daily", the rotation is done at GMT. In 
-             * orderto fix this, add an offset.
+             * order to fix this, add an offset.
              */
             unsigned offset;
             
@@ -375,8 +387,54 @@ struct Masscan
         struct NmapServiceProbeList *probes;
     } payloads;
     
-    unsigned char *http_user_agent;
-    unsigned http_user_agent_length;
+    /** Reconfigure the HTTP header */
+    struct {
+        /* Method */
+        unsigned char *method;
+        size_t method_length;
+
+        /* URL */
+        unsigned char *url;
+        size_t url_length;
+
+        /* Version */
+        unsigned char *version;
+        size_t version_length;
+
+        /* Host */
+        unsigned char *host;
+        size_t host_length;
+
+        /* User-Agent */
+        unsigned char *user_agent;
+        size_t user_agent_length;
+
+        /* Payload after the header*/
+        unsigned char *payload;
+        size_t payload_length;
+
+        /* Headers */
+        struct {
+            const char *name;
+            unsigned char *value;
+            size_t value_length;
+        } headers[16];
+        size_t headers_count;
+
+        /* Cookies */
+        struct {
+            unsigned char *value;
+            size_t value_length;
+        } cookies[16];
+        size_t cookies_count;
+
+        /* Remove */
+        struct {
+            unsigned char *name;
+        } remove[16];
+        size_t remove_count;
+    } http;
+
     unsigned tcp_connection_timeout;
     
     /** Number of seconds to wait for a 'hello' from the server before
@@ -386,11 +444,6 @@ struct Masscan
      * hellos, such as FTP or VNC */
     unsigned tcp_hello_timeout;
 
-    struct {
-        const char *header_name;
-        unsigned char *header_value;
-        unsigned header_value_length;
-    } http_headers[16];
 
     char *bpf_filter;
 
@@ -464,7 +517,7 @@ masscan_set_parameter(struct Masscan *masscan,
 
 
 /**
- * Discover the local network adapter parameters, such as whcih
+ * Discover the local network adapter parameters, such as which
  * MAC address we are using and the MAC addresses of the
  * local routers.
  */
