@@ -3,7 +3,6 @@ CC = gcc
 else
 CC = cc
 endif
-endif
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
