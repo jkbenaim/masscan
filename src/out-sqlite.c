@@ -13,8 +13,8 @@ enum STMT_ID_e {
 	STMT_ADD_SENSE,
 	STMT_SET_SCAN_TIMES,
 	STMT_ADD_PROTO,
-	STMT_ADD_ZONE,
-	STMT_GET_ZONE_ID_FOR_NAME,
+	STMT_ADD_STATION,
+	STMT_GET_STATION_ID_FOR_NAME,
 };
 
 struct db_stmt_s {
@@ -31,7 +31,7 @@ struct db_stmt_s {
 			"	sense_id INTEGER PRIMARY KEY,\n"
 			"	scan_id,\n"
 			"	time,\n"
-			"	zone_id,\n"
+			"	station_id,\n"
 			"	ip,\n"
 			"	port,\n"
 			"	proto,\n"
@@ -40,7 +40,7 @@ struct db_stmt_s {
 			"CREATE TABLE IF NOT EXISTS scans(\n"
 			"	scan_id INTEGER PRIMARY KEY,\n"
 			"	version,\n"
-			"	zone_id,\n"
+			"	station_id,\n"
 			"	start,\n"
 			"	end,\n"
 			"	filename\n"
@@ -49,14 +49,14 @@ struct db_stmt_s {
 			"	id INTEGER PRIMARY KEY,\n"
 			"	name\n"
 			");\n"
-			"CREATE TABLE IF NOT EXISTS zones(\n"
+			"CREATE TABLE IF NOT EXISTS stations(\n"
 			"	id INTEGER PRIMARY KEY,\n"
 			"	name UNIQUE\n"
 			");\n"
 	},
 	{
 		.id = STMT_NEW_SCAN,
-		.sqltext = "INSERT INTO scans(version, zone_id, filename) VALUES(:version, :zone_id, :filename);",
+		.sqltext = "INSERT INTO scans(version, station_id, filename) VALUES(:version, :station_id, :filename);",
 	},
 	{
 		.id = STMT_ADD_SENSE,
@@ -64,7 +64,7 @@ struct db_stmt_s {
 			"INSERT INTO sense(\n"
 			"	scan_id,\n"
 			"	time,\n"
-			"	zone_id,\n"
+			"	station_id,\n"
 			"	ip,\n"
 			"	port,\n"
 			"	proto,\n"
@@ -72,7 +72,7 @@ struct db_stmt_s {
 			"VALUES(\n"
 			"	:scan_id,\n"
 			"	:time,\n"
-			"	:zone_id,\n"
+			"	:station_id,\n"
 			"	:ip,\n"
 			"	:port,\n"
 			"	:proto,\n"
@@ -88,12 +88,12 @@ struct db_stmt_s {
 		.sqltext = "INSERT INTO protos(id, name) VALUES (:id, :name) ON CONFLICT DO NOTHING;",
 	},
 	{
-		.id = STMT_ADD_ZONE,
-		.sqltext = "INSERT INTO zones(name) VALUES (:name) ON CONFLICT DO NOTHING;",
+		.id = STMT_ADD_STATION,
+		.sqltext = "INSERT INTO stations(name) VALUES (:name) ON CONFLICT DO NOTHING;",
 	},
 	{
-		.id = STMT_GET_ZONE_ID_FOR_NAME,
-		.sqltext = "SELECT id FROM zones WHERE zones.name=:name;",
+		.id = STMT_GET_STATION_ID_FOR_NAME,
+		.sqltext = "SELECT id FROM stations WHERE stations.name=:name;",
 	},
 	{
 		// sentinel
@@ -120,7 +120,7 @@ sqlite_out_open(struct Output *out, FILE *fp)
 	char *zErr = NULL;
 	char *zErr2 = NULL;
 
-	// determine network zone from input filename
+	// determine scanning station from input filename
 	char *temp = strdup(out->infilename);
 	char *temp2 = temp;
 	temp2 = strrchr(temp, '/');
@@ -135,7 +135,7 @@ sqlite_out_open(struct Output *out, FILE *fp)
 	} else {
 		temp2++;
 	}
-	char *zonename = strdup(temp2);
+	char *stationname = strdup(temp2);
 	free(temp);
 
 	out->is_first_record_seen = 0;
@@ -180,40 +180,40 @@ sqlite_out_open(struct Output *out, FILE *fp)
 		}
 	}
 
-	// add row to zones table, if necessary.
-	struct db_stmt_s *s = &stmts[STMT_ADD_ZONE];
-	rc = sqlite3_bind_text(s->stmt, 1, zonename, -1, SQLITE_TRANSIENT);
+	// add row to stations table, if necessary.
+	struct db_stmt_s *s = &stmts[STMT_ADD_STATION];
+	rc = sqlite3_bind_text(s->stmt, 1, stationname, -1, SQLITE_TRANSIENT);
 	if (rc != SQLITE_OK) {
-		zErr = "in bind zone name";
+		zErr = "in bind station name";
 		goto out_return;
 	}
 	rc = sqlite3_step(s->stmt);
 	if (rc != SQLITE_DONE) {
-		zErr = "in step add zone";
+		zErr = "in step add station";
 		goto out_return;
 	}
 	rc = sqlite3_reset(s->stmt);
 	if (rc != SQLITE_OK) {
-		zErr = "in reset add zone";
+		zErr = "in reset add station";
 		goto out_return;
 	}
 
-	// get zone_id.
-	s = &stmts[STMT_GET_ZONE_ID_FOR_NAME];
-	rc = sqlite3_bind_text(s->stmt, 1, zonename, -1, SQLITE_TRANSIENT);
+	// get station_id.
+	s = &stmts[STMT_GET_STATION_ID_FOR_NAME];
+	rc = sqlite3_bind_text(s->stmt, 1, stationname, -1, SQLITE_TRANSIENT);
 	if (rc != SQLITE_OK) {
-		zErr = "in bind zone name for zone_id lookup";
+		zErr = "in bind station name for station_id lookup";
 		goto out_return;
 	}
 	rc = sqlite3_step(s->stmt);
 	if (rc != SQLITE_ROW) {
-		zErr = "couldn't get zone_id";
+		zErr = "couldn't get station_id";
 		goto out_return;
 	}
-	out->zone_id = sqlite3_column_int(s->stmt, 0);
+	out->station_id = sqlite3_column_int(s->stmt, 0);
 	rc = sqlite3_reset(s->stmt);
 	if (rc != SQLITE_OK) {
-		zErr = "in reset zone_id for name";
+		zErr = "in reset station_id for name";
 		goto out_return;
 	}
 
@@ -227,10 +227,10 @@ sqlite_out_open(struct Output *out, FILE *fp)
 		goto out_return;
 	}
 
-	// scan zone_id
-	rc = sqlite3_bind_int64(s->stmt, 2, out->zone_id);
+	// scan station_id
+	rc = sqlite3_bind_int64(s->stmt, 2, out->station_id);
 	if (rc != SQLITE_OK) {
-		zErr = "in new scan bind zone_id";
+		zErr = "in new scan bind station_id";
 		goto out_return;
 	}
 
@@ -485,10 +485,10 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 	rc = sqlite3_bind_int64(
 		s->stmt,
 		3,
-		out->zone_id
+		out->station_id
 	);
 	if (rc != SQLITE_OK) {
-		zErr = "in bind zone_id";
+		zErr = "in bind station_id";
 		goto out_return;
 	}
 
@@ -628,10 +628,10 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 	rc = sqlite3_bind_int64(
 		s->stmt,
 		3,
-		out->zone_id
+		out->station_id
 	);
 	if (rc != SQLITE_OK) {
-		zErr = "in bind zone_id";
+		zErr = "in bind station_id";
 		goto out_return;
 	}
 

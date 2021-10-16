@@ -47,7 +47,7 @@ struct Output
     const struct Masscan *masscan;
     char *filename;
     char *infilename;
-    int64_t zone_id;
+    int64_t station_id;
     int64_t scan_id;
     struct stack_src_t src[8];
     FILE *fp;
