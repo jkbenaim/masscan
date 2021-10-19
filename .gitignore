@@ -1,3 +1,4 @@
 paused.conf
 *.swp
 .vscode
+.idea
