@@ -11,7 +11,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     //static char tmp[64];
 
     switch (proto) {
-    case PROTO_NONE: return "tcp";
+    case PROTO_NONE: return "none";
     case PROTO_HEUR: return "unknown";
     case PROTO_SSH1: return "ssh";
     case PROTO_SSH2: return "ssh";

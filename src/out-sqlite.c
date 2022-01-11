@@ -33,6 +33,7 @@ struct db_stmt_s {
 			"	time,\n"
 			"	station_id,\n"
 			"	ip,\n"
+			"	ip_proto,\n"
 			"	port,\n"
 			"	proto,\n"
 			"	px\n"
@@ -66,6 +67,7 @@ struct db_stmt_s {
 			"	time,\n"
 			"	station_id,\n"
 			"	ip,\n"
+			"	ip_proto,\n"
 			"	port,\n"
 			"	proto,\n"
 			"	px)\n"
@@ -74,6 +76,7 @@ struct db_stmt_s {
 			"	:time,\n"
 			"	:station_id,\n"
 			"	:ip,\n"
+			"	:ip_proto,\n"
 			"	:port,\n"
 			"	:proto,\n"
 			"	:px\n"
@@ -444,11 +447,6 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 		goto out_return;
 	}
 
-	// tcp only, please
-	if (ip_proto != 6) {
-		return;
-	}
-
 	// update min/max observed times for this scan
 	if (!out->is_first_record_seen) {
 		out->is_first_record_seen = 1;
@@ -505,6 +503,16 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 	rc = sqlite3_bind_int(
 		s->stmt,
 		5,
+		ip_proto
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind ip_proto";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int(
+		s->stmt,
+		6,
 		port
 	);
 	if (rc != SQLITE_OK) {
@@ -525,8 +533,8 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 	);*/
 	rc = sqlite3_bind_int(
 		s->stmt,
-		6,
-		0	/* proto "tcp" */
+		7,
+		0	/* proto "none" */
 	);
 	if (rc != SQLITE_OK) {
 		zErr = "in bind proto";
@@ -536,7 +544,7 @@ sqlite_out_status(struct Output *out, FILE *fp, time_t timestamp,
 	// bind px = null
 	rc = sqlite3_bind_null(
 		s->stmt,
-		7
+		8
 	);
 	if (rc != SQLITE_OK) {
 		zErr = "in bind px (null)";
@@ -648,6 +656,16 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 	rc = sqlite3_bind_int(
 		s->stmt,
 		5,
+		ip_proto
+	);
+	if (rc != SQLITE_OK) {
+		zErr = "in bind ip_proto";
+		goto out_return;
+	}
+
+	rc = sqlite3_bind_int(
+		s->stmt,
+		6,
 		port
 	);
 	if (rc != SQLITE_OK) {
@@ -665,7 +683,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 	);*/
 	rc = sqlite3_bind_int(
 		s->stmt,
-		6,
+		7,
 		proto
 	);
 	if (rc != SQLITE_OK) {
@@ -701,7 +719,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 		if (pxbuf_len == 0) {
 			rc = sqlite3_bind_null(
 				s->stmt,
-				7
+				8
 			);
 		} else {
 			if (!pxbuf) {
@@ -711,7 +729,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 
 			rc = sqlite3_bind_blob(
 				s->stmt,
-				7,
+				8,
 				pxbuf,
 				pxbuf_len,
 				free
@@ -726,7 +744,7 @@ sqlite_out_banner(struct Output *out, FILE *fp, time_t timestamp,
 	default:
 		rc = sqlite3_bind_text(
 			s->stmt,
-			7,
+			8,
 			(const char *)px,
 			length,
 			SQLITE_TRANSIENT
