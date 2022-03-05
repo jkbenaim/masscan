@@ -18,12 +18,10 @@ enum STMT_ID_e {
 };
 
 struct db_stmt_s {
-	enum STMT_ID_e id;
 	const char *sqltext;
 	sqlite3_stmt *stmt;
 } stmts[] = {
-	{
-		.id = STMT_INIT,
+	[STMT_INIT] = {
 		.sqltext =
 			"PRAGMA page_size=65536;\n"
 			"PRAGMA journal_mode=WAL;\n"
@@ -44,7 +42,8 @@ struct db_stmt_s {
 			"	station_id,\n"
 			"	start,\n"
 			"	end,\n"
-			"	filename\n"
+			"	filename,\n"
+			"	UNIQUE(filename)\n"
 			");\n"
 			"CREATE TABLE IF NOT EXISTS protos(\n"
 			"	id INTEGER PRIMARY KEY,\n"
@@ -55,12 +54,10 @@ struct db_stmt_s {
 			"	name UNIQUE\n"
 			");\n"
 	},
-	{
-		.id = STMT_NEW_SCAN,
+	[STMT_NEW_SCAN] = {
 		.sqltext = "INSERT INTO scans(version, station_id, filename) VALUES(:version, :station_id, :filename);",
 	},
-	{
-		.id = STMT_ADD_SENSE,
+	[STMT_ADD_SENSE] = {
 		.sqltext =
 			"INSERT INTO sense(\n"
 			"	scan_id,\n"
@@ -82,20 +79,16 @@ struct db_stmt_s {
 			"	:px\n"
 			");\n"
 	},
-	{
-		.id = STMT_SET_SCAN_TIMES,
+	[STMT_SET_SCAN_TIMES] = {
 		.sqltext = "UPDATE scans SET start=:start, end=:end WHERE scan_id=:scan_id;",
 	},
-	{
-		.id = STMT_ADD_PROTO,
+	[STMT_ADD_PROTO] = {
 		.sqltext = "INSERT INTO protos(id, name) VALUES (:id, :name) ON CONFLICT DO NOTHING;",
 	},
-	{
-		.id = STMT_ADD_STATION,
+	[STMT_ADD_STATION] = {
 		.sqltext = "INSERT INTO stations(name) VALUES (:name) ON CONFLICT DO NOTHING;",
 	},
-	{
-		.id = STMT_GET_STATION_ID_FOR_NAME,
+	[STMT_GET_STATION_ID_FOR_NAME] = {
 		.sqltext = "SELECT id FROM stations WHERE stations.name=:name;",
 	},
 	{
